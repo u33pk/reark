@@ -33,3 +33,9 @@ plugins {
 }
 
 include(":composeApp")
+include(":abcdeCore:abcde")
+include(":abcdeCore:common")
+include(":abcdeCore:hapde")
+include(":abcdeCore:resde")
+
+include("core")
