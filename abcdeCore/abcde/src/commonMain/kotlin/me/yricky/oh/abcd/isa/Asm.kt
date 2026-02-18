@@ -6,8 +6,10 @@ import me.yricky.oh.abcd.code.TryBlock
 import me.yricky.oh.abcd.decompiler.behaviour.IrOp
 import me.yricky.oh.abcd.isa.Inst.Companion.toUnsignedInt
 import me.yricky.oh.abcd.isa.util.BaseInstParser
+import me.yricky.oh.abcd.isa.util.ExternModuleParser
 import me.yricky.oh.abcd.isa.util.InstCommentParser
 import me.yricky.oh.abcd.isa.util.InstDisAsmParser
+import me.yricky.oh.abcd.isa.util.V2AInstParser
 import me.yricky.oh.abcd.literal.LiteralArray
 import me.yricky.oh.common.value
 
@@ -22,6 +24,7 @@ class Asm(
 ) {
     companion object{
         val innerAsmMap by lazy { loadInnerAsmMap() }
+        val operandParser = listOf(V2AInstParser, ExternModuleParser)
     }
     val list:List<AsmItem> by lazy{
         val li = ArrayList<AsmItem>()
@@ -114,6 +117,18 @@ class Asm(
                 } else throw IllegalStateException("Unsupported bitSize")
             }
             opUnit
+        }
+        override fun toString(): String {
+            var res : StringBuilder = StringBuilder()
+            res.append("${asmName} ")
+            this.asmArgs(operandParser).forEach { (idx, args) ->
+                if(args != null){
+                    res.append("${args.text} ")
+                }
+            }
+//            res.append(" # ${pseudoString}")
+//            println(res.toString())
+            return res.toString()
         }
     }
 }

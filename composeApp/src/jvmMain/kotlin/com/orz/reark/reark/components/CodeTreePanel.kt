@@ -13,6 +13,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
+import me.yricky.oh.abcd.AbcBuf
+import me.yricky.oh.abcd.cfm.AbcClass
+import me.yricky.oh.abcd.cfm.ClassItem
+import me.yricky.oh.common.wrapAsLEByteBuf
+import java.io.File
+import java.nio.ByteOrder
+import java.nio.channels.FileChannel
+
 
 data class TreeNode(
     val id: String,
@@ -28,29 +36,14 @@ enum class NodeType {
 
 @Composable
 fun CodeTreePanel(modifier: Modifier = Modifier) {
-    val treeNodes = remember {
-        mutableStateListOf(
-            TreeNode("1", "com.example", NodeType.PACKAGE, listOf(
-                TreeNode("1-1", "MainActivity", NodeType.CLASS, listOf(
-                    TreeNode("1-1-1", "onCreate", NodeType.METHOD),
-                    TreeNode("1-1-2", "onDestroy", NodeType.METHOD),
-                    TreeNode("1-1-3", "mData", NodeType.FIELD)
-                )),
-                TreeNode("1-2", "UserModel", NodeType.CLASS, listOf(
-                    TreeNode("1-2-1", "getName", NodeType.METHOD),
-                    TreeNode("1-2-2", "setName", NodeType.METHOD)
-                ))
-            )),
-            TreeNode("2", "res", NodeType.DIRECTORY, listOf(
-                TreeNode("2-1", "layout", NodeType.DIRECTORY, listOf(
-                    TreeNode("2-1-1", "activity_main.xml", NodeType.FILE)
-                )),
-                TreeNode("2-2", "values", NodeType.DIRECTORY, listOf(
-                    TreeNode("2-2-1", "strings.xml", NodeType.FILE)
-                ))
-            ))
-        )
-    }
+    /************************/
+    // TODO: 这一段为测试数据用，后续需要转换为真实参数: classes: Map<Int, ClassItem>
+    val file = File("/home/orz/data/unitTest/out/ets/widgets.abc")
+    val mmap = FileChannel.open(file.toPath()).map(FileChannel.MapMode.READ_ONLY,0,file.length())
+    val abc = AbcBuf("", wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+    val classes = abc.classes;
+    /**********************/
+    val treeNodes = buildClassTree(classes)
     
     var searchText by remember { mutableStateOf("") }
     
@@ -148,4 +141,106 @@ fun TreeNodeItem(node: TreeNode, depth: Int) {
             }
         }
     }
+}
+
+fun buildClassTree(classes: Map<Int, ClassItem>): List<TreeNode> {
+    class MutableTreeNode(
+        val name: String,
+        val type: NodeType,
+        val id: String,
+        val children: MutableMap<String, MutableTreeNode> = mutableMapOf()
+    )
+
+    val root = MutableTreeNode("root", NodeType.DIRECTORY, "root")
+
+    // 第一步：构建目录结构 + 类节点（使用短名称）
+    for ((off, item) in classes) {
+        if(item !is AbcClass)
+            continue
+        val pathParts = item.name.split("/")
+        var current = root
+
+        // 遍历所有路径段
+        for (i in pathParts.indices) {
+            val part = pathParts[i]
+            val isLast = (i == pathParts.lastIndex)
+
+            if (isLast) {
+                // 最后一段：类节点，name = 最后一段，id = off
+                val className = part
+                val classNode = MutableTreeNode(
+                    name = className,
+                    type = NodeType.CLASS,
+                    id = off.toString()
+                )
+                current.children[part] = classNode
+            } else {
+                // 中间段：PACKAGE 节点
+                current = current.children.getOrPut(part) {
+                    MutableTreeNode(
+                        name = part,
+                        type = NodeType.PACKAGE,
+                        id = "pkg_${current.id}_$part" // 非关键，仅保证唯一
+                    )
+                }
+            }
+        }
+    }
+
+    // 第二步：为每个 CLASS 节点挂载 methods 和 fields
+    fun findAndAttachMembers(node: MutableTreeNode, classesByPath: Map<String, ClassItem>) {
+        if (node.type == NodeType.CLASS) {
+            // 根据完整路径反查 ClassItem
+            // 我们需要知道这个类的完整路径 → 但当前没有存储
+            // 所以换种方式：遍历 classes，匹配 id
+            // 更简单：在第一步就记录 classNode -> ClassItem 映射
+        }
+    }
+
+    // 更直接的方式：重新遍历 classes，在树中定位类节点并附加成员
+    for ((off, item) in classes) {
+        if(item !is AbcClass)
+            continue
+        val pathParts = item.name.split("/")
+        var current: MutableTreeNode? = root
+
+        // 导航到类节点
+        for (part in pathParts) {
+            current = current?.children?.get(part)
+            if (current == null) break
+        }
+
+        if (current != null && current.type == NodeType.CLASS && current.id == off.toString()) {
+            // 添加 methods
+            item.methods.forEach { method ->
+                // 避免重复 key，用 method 内容作 key（假设唯一）
+                current.children[method.name] = MutableTreeNode(
+                    name = method.name,
+                    type = NodeType.METHOD,
+                    id = "${current.id}_m_${method.hashCode()}"
+                )
+            }
+
+            // 添加 fields
+            item.fields.forEach { field ->
+                current.children[field.name] = MutableTreeNode(
+                    name = field.name,
+                    type = NodeType.FIELD,
+                    id = "${current.id}_f_${field.hashCode()}"
+                )
+            }
+        }
+    }
+
+    // 转为不可变 TreeNode
+    fun convert(node: MutableTreeNode): TreeNode {
+        return TreeNode(
+            id = node.id,
+            name = node.name,
+            type = node.type,
+            children = node.children.values.sortedBy { it.name }.map { convert(it) }
+        )
+    }
+
+    return root.children.values.map { convert(it) }
 }
