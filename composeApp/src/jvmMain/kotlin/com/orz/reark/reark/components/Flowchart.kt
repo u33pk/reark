@@ -113,15 +113,6 @@ fun Flowchart(
             modifier = Modifier.align(Alignment.BottomEnd)
         )
 
-        // 提示信息
-//        Text(
-//            text = "滚轮缩放 | 拖动平移 | 选中文本复制",
-//            modifier = Modifier
-//                .align(Alignment.TopStart)
-//                .padding(8.dp),
-//            style = MaterialTheme.typography.bodySmall,
-//            color = MaterialTheme.colorScheme.onSurfaceVariant
-//        )
     }
 }
 
@@ -140,14 +131,18 @@ private fun FlowchartConnections(
             val toPos = nodePositions[connection.toId]
 
             if (fromPos != null && toPos != null) {
-                // 计算连接点（从节点右侧到节点左侧）
+                // 计算连接点（从节点下面到节点上面）
                 val fromNode = nodes.find { it.id == connection.fromId }
                 val toNode = nodes.find { it.id == connection.toId }
 
-                val startX = fromPos.x + 200f // 估计节点宽度
-                val startY = fromPos.y + 40f  // 估计节点中心
-                val endX = toPos.x
-                val endY = toPos.y + 40f
+                // 获取节点高度
+                val fromNodeHeight = fromNode?.let { 30f + it.instructions.size * 15f } ?: 80f
+                val toNodeHeight = toNode?.let { 30f + it.instructions.size * 15f } ?: 80f
+                
+                val startX = fromPos.x + 100f // 节点中心
+                val startY = fromPos.y + fromNodeHeight // 节点底部
+                val endX = toPos.x + 100f // 节点中心
+                val endY = toPos.y // 节点顶部
 
                 drawConnectionLine(
                     start = Offset(startX, startY),
@@ -166,7 +161,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawConnectionLine(
 ) {
     val color = if (isJump) Color.Red else Color.Blue
     val strokeWidth = 2f
-    val curveOffset = 40f // 减小这个值使曲线变短
+    val curveOffset = 30f // 减小这个值使曲线变短
 
     // 绘制贝塞尔曲线
     val path = androidx.compose.ui.graphics.Path().apply {
@@ -186,19 +181,52 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawConnectionLine(
         style = Stroke(width = strokeWidth)
     )
 
-    // 绘制箭头
-    val arrowSize = 8f
-    val angle = kotlin.math.atan2(end.y - start.y, end.x - start.x)
+    // 计算贝塞尔曲线上的中间点（t = 0.5）
+    // 贝塞尔曲线公式：B(t) = (1-t)³P0 + 3(1-t)²tP1 + 3(1-t)t²P2 + t³P3
+    // 其中 P0=start, P1=control1, P2=control2, P3=end
+    val t = 0.5f
+    val oneMinusT = 1f - t
+    val oneMinusT2 = oneMinusT * oneMinusT
+    val oneMinusT3 = oneMinusT2 * oneMinusT
+    val t2 = t * t
+    val t3 = t2 * t
+    
+    val controlX1 = start.x + curveOffset
+    val controlY1 = start.y
+    val controlX2 = end.x - curveOffset
+    val controlY2 = end.y
+    
+    val midX = oneMinusT3 * start.x + 
+               3 * oneMinusT2 * t * controlX1 + 
+               3 * oneMinusT * t2 * controlX2 + 
+               t3 * end.x
+    val midY = oneMinusT3 * start.y + 
+               3 * oneMinusT2 * t * controlY1 + 
+               3 * oneMinusT * t2 * controlY2 + 
+               t3 * end.y
+    
+    // 计算贝塞尔曲线在中间点的切线方向（导数）
+    // B'(t) = 3(1-t)²(P1-P0) + 6(1-t)t(P2-P1) + 3t²(P3-P2)
+    val dx = 3 * oneMinusT2 * (controlX1 - start.x) + 
+             6 * oneMinusT * t * (controlX2 - controlX1) + 
+             3 * t2 * (end.x - controlX2)
+    val dy = 3 * oneMinusT2 * (controlY1 - start.y) + 
+             6 * oneMinusT * t * (controlY2 - controlY1) + 
+             3 * t2 * (end.y - controlY2)
+    
+    val angle = kotlin.math.atan2(dy, dx)
 
+    // 绘制箭头在中间点
+    val arrowSize = 8f
     val arrowPath = androidx.compose.ui.graphics.Path().apply {
-        moveTo(end.x, end.y)
+        moveTo(midX, midY)
         lineTo(
-            (end.x - arrowSize * kotlin.math.cos(angle - kotlin.math.PI / 6)).toFloat(),
-            (end.y - arrowSize * kotlin.math.sin(angle - kotlin.math.PI / 6)).toFloat()
+            (midX - arrowSize * kotlin.math.cos(angle - kotlin.math.PI / 6)).toFloat(),
+            (midY - arrowSize * kotlin.math.sin(angle - kotlin.math.PI / 6)).toFloat()
         )
         lineTo(
-            (end.x - arrowSize * kotlin.math.cos(angle + kotlin.math.PI / 6)).toFloat(),
-            (end.y - arrowSize * kotlin.math.sin(angle + kotlin.math.PI / 6)).toFloat()
+            (midX - arrowSize * kotlin.math.cos(angle + kotlin.math.PI / 6)).toFloat(),
+            (midY - arrowSize * kotlin.math.sin(angle + kotlin.math.PI / 6)).toFloat()
         )
         close()
     }
