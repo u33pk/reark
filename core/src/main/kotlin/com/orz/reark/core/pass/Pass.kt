@@ -1,7 +1,9 @@
-package com.orz.reark.core.ssa.pass
+package com.orz.reark.core.pass
 
-import com.orz.reark.core.ssa.ir.*
-import com.orz.reark.core.ssa.ir.Function as SSAFunction
+import com.orz.reark.core.ir.BasicBlock
+import com.orz.reark.core.ir.Module
+import kotlin.reflect.KClass
+import com.orz.reark.core.ir.Function as SSAFunction
 
 /**
  * Pass基类 - LLVM风格的Pass模式
@@ -130,7 +132,7 @@ class Loop(
 /**
  * Pass依赖关系
  */
-annotation class RequiresPass(val passClass: kotlin.reflect.KClass<out Pass>)
+annotation class RequiresPass(val passClass: KClass<out Pass>)
 
 /**
  * Pass无效化标记
@@ -138,7 +140,7 @@ annotation class RequiresPass(val passClass: kotlin.reflect.KClass<out Pass>)
  * 标记此Pass会修改IR的哪些部分，用于管理分析结果缓存
  */
 annotation class Invalidates(
-    val analyses: kotlin.Array<kotlin.reflect.KClass<out AnalysisPass<*>>> = []
+    val analyses: Array<KClass<out AnalysisPass<*>>> = []
 )
 
 /**

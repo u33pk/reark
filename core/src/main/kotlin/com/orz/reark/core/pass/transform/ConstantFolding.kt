@@ -1,8 +1,35 @@
-package com.orz.reark.core.ssa.transform
+package com.orz.reark.core.pass.transform
 
-import com.orz.reark.core.ssa.ir.*
-import com.orz.reark.core.ssa.pass.*
-import com.orz.reark.core.ssa.ir.Function as SSAFunction
+import com.orz.reark.core.ir.AShrInst
+import com.orz.reark.core.ir.AddInst
+import com.orz.reark.core.ir.AndInst
+import com.orz.reark.core.ir.BitNotInst
+import com.orz.reark.core.ir.Constant
+import com.orz.reark.core.ir.ConstantFP
+import com.orz.reark.core.ir.ConstantInt
+import com.orz.reark.core.ir.DivInst
+import com.orz.reark.core.ir.EqInst
+import com.orz.reark.core.ir.GeInst
+import com.orz.reark.core.ir.GtInst
+import com.orz.reark.core.ir.Instruction
+import com.orz.reark.core.ir.LeInst
+import com.orz.reark.core.ir.LtInst
+import com.orz.reark.core.ir.ModInst
+import com.orz.reark.core.ir.MulInst
+import com.orz.reark.core.ir.NeInst
+import com.orz.reark.core.ir.NegInst
+import com.orz.reark.core.ir.NotInst
+import com.orz.reark.core.ir.OrInst
+import com.orz.reark.core.ir.SelectInst
+import com.orz.reark.core.ir.ShlInst
+import com.orz.reark.core.ir.ShrInst
+import com.orz.reark.core.ir.StoreInst
+import com.orz.reark.core.ir.SubInst
+import com.orz.reark.core.ir.Value
+import com.orz.reark.core.ir.XorInst
+import com.orz.reark.core.pass.FunctionPass
+import com.orz.reark.core.pass.PassResult
+import com.orz.reark.core.ir.Function as SSAFunction
 
 /**
  * 常量折叠 (Constant Folding)
@@ -37,10 +64,10 @@ class ConstantFolding : FunctionPass {
             is AddInst -> foldBinary(inst.left, inst.right) { a, b -> a + b }
             is SubInst -> foldBinary(inst.left, inst.right) { a, b -> a - b }
             is MulInst -> foldBinary(inst.left, inst.right) { a, b -> a * b }
-            is DivInst -> foldBinary(inst.left, inst.right) { a, b -> 
+            is DivInst -> foldBinary(inst.left, inst.right) { a, b ->
                 if (b == 0.0) null else a / b 
             }
-            is ModInst -> foldBinary(inst.left, inst.right) { a, b -> 
+            is ModInst -> foldBinary(inst.left, inst.right) { a, b ->
                 if (b == 0.0) null else a % b 
             }
             is EqInst -> foldComparison(inst.left, inst.right) { a, b -> a == b }

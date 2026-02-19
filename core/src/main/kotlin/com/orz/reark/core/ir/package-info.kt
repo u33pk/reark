@@ -34,4 +34,4 @@
  * pm.run(module)
  * ```
  */
-package com.orz.reark.core.ssa.ir
+package com.orz.reark.core.ir

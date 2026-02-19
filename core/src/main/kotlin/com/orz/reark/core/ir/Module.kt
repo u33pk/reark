@@ -1,4 +1,4 @@
-package com.orz.reark.core.ssa.ir
+package com.orz.reark.core.ir
 
 /**
  * 模块 - 包含多个函数的编译单元

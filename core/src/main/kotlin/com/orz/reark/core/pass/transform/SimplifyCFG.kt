@@ -1,8 +1,12 @@
-package com.orz.reark.core.ssa.transform
+package com.orz.reark.core.pass.transform
 
-import com.orz.reark.core.ssa.ir.*
-import com.orz.reark.core.ssa.pass.*
-import com.orz.reark.core.ssa.ir.Function as SSAFunction
+import com.orz.reark.core.ir.BasicBlock
+import com.orz.reark.core.ir.BranchInst
+import com.orz.reark.core.ir.CondBranchInst
+import com.orz.reark.core.ir.ConstantInt
+import com.orz.reark.core.pass.FunctionPass
+import com.orz.reark.core.pass.PassResult
+import com.orz.reark.core.ir.Function as SSAFunction
 
 /**
  * 控制流图简化 (Simplify CFG)

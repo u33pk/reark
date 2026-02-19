@@ -1,10 +1,10 @@
-package com.orz.reark.core.ssa.pass
+package com.orz.reark.core.pass
 
-import com.orz.reark.core.ssa.ir.*
-import com.orz.reark.core.ssa.ir.Function as SSAFunction
-import com.orz.reark.core.ssa.transform.DeadCodeElimination
-import com.orz.reark.core.ssa.transform.ConstantFolding
-import com.orz.reark.core.ssa.transform.SimplifyCFG
+import com.orz.reark.core.ir.Function as SSAFunction
+import com.orz.reark.core.pass.transform.DeadCodeElimination
+import com.orz.reark.core.pass.transform.ConstantFolding
+import com.orz.reark.core.pass.transform.SimplifyCFG
+import com.orz.reark.core.ir.Module
 
 /**
  * Pass管理器 - 管理和执行Pass的基础设施
@@ -242,8 +242,8 @@ class PassManager {
     private fun updateStatistics(passName: String, timeMs: Long, result: PassResult) {
         if (!collectStatistics) return
         
-        val stats = statistics.getOrPut(passName) { 
-            PassStatistics(passName) 
+        val stats = statistics.getOrPut(passName) {
+            PassStatistics(passName)
         }
         
         stats.runCount++

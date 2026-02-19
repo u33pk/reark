@@ -1,4 +1,4 @@
-package com.orz.reark.core.ssa.ir
+package com.orz.reark.core.ir
 
 /**
  * IR类型系统 - 用于表示SSA值的数据类型

@@ -1,4 +1,4 @@
-package com.orz.reark.core.ssa.ir
+package com.orz.reark.core.ir
 
 /**
  * 基本块 (Basic Block) - SSA控制流图中的节点

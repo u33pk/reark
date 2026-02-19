@@ -1,4 +1,4 @@
-package com.orz.reark.core.ssa.ir
+package com.orz.reark.core.ir
 
 /**
  * Use类 - 表示一个Value被另一个Value使用的关系

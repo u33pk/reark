@@ -1,4 +1,4 @@
-package com.orz.reark.core.ssa.ir
+package com.orz.reark.core.ir
 
 /**
  * 函数 - SSA IR中的函数表示

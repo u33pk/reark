@@ -1,4 +1,4 @@
-package com.orz.reark.core.ssa.ir
+package com.orz.reark.core.ir
 
 /**
  * 指令操作码枚举 - 对应pandaASM到SSA IR的映射

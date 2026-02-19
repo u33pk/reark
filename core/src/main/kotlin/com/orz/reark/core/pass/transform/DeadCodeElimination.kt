@@ -1,8 +1,10 @@
-package com.orz.reark.core.ssa.transform
+package com.orz.reark.core.pass.transform
 
-import com.orz.reark.core.ssa.ir.*
-import com.orz.reark.core.ssa.pass.*
-import com.orz.reark.core.ssa.ir.Function as SSAFunction
+import com.orz.reark.core.ir.BasicBlock
+import com.orz.reark.core.ir.Instruction
+import com.orz.reark.core.pass.FunctionPass
+import com.orz.reark.core.pass.PassResult
+import com.orz.reark.core.ir.Function as SSAFunction
 
 /**
  * 死代码消除 (Dead Code Elimination)
