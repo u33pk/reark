@@ -8,6 +8,7 @@ import com.orz.reark.core.ir.i32Type
 import com.orz.reark.core.ir.stringType
 import com.orz.reark.core.ir.voidType
 import com.orz.reark.core.pass.PassManager
+import com.orz.reark.core.pass.transform.AggressiveDeadCodeElimination
 import com.orz.reark.core.pass.transform.AlgebraicSimplification
 import com.orz.reark.core.pass.transform.ConstantFolding
 import com.orz.reark.core.pass.transform.DeadCodeElimination
@@ -178,7 +179,7 @@ object Test {
         val pm = PassManager()
 
         // 添加优化Pass
-        pm.addPass(DeadCodeElimination())
+        pm.addPass(AggressiveDeadCodeElimination())
         pm.addPass(ConstantFolding())
         pm.addPass(AlgebraicSimplification())
         pm.addPass(SimplifyCFG())
@@ -266,8 +267,8 @@ object Test {
         builder.setInsertPoint(entry)
 
         // 这些计算的结果未被使用，会被消除
-        val unused1 = builder.createMul(x, x, "unused1")
-        val unused2 = builder.createAdd(unused1, x, "unused2")
+        val unused1 = builder.createMul(x, x, "unused1")        // unused1 = MUL x, x
+        val unused2 = builder.createAdd(unused1, x, "unused2")  // unused2 = ADD unused1, x
 
         // 只有这个会被保留
         val result = builder.createAdd(x, builder.getConstantI32(1), "result")
@@ -285,32 +286,32 @@ object Test {
         println("SSA IR Examples")
         println("=".repeat(60))
 
-        println("\n1. Simple Add Function:")
-        println(createAddFunction().printDetailed())
-
-        println("\n2. If-Else Function:")
-        println(createIfElseFunction().printDetailed())
-
-        println("\n3. With Accumulator Model:")
-        println(createWithAccumulator().printDetailed())
-
-        println("\n4. Object Operations:")
-        println(createObjectOperations().printDetailed())
-
-        println("\n5. Function Call:")
-        println(createFunctionCall().printDetailed())
-
-        println("\n6. Array Operations:")
-        println(createArrayOperations().printDetailed())
-
-        println("\n7. Constant Folding Example:")
-        runOptimizations(createConstantFoldingExample())
+//        println("\n1. Simple Add Function:")
+//        println(createAddFunction().printDetailed())
+//
+//        println("\n2. If-Else Function:")
+//        println(createIfElseFunction().printDetailed())
+//
+//        println("\n3. With Accumulator Model:")
+//        println(createWithAccumulator().printDetailed())
+//
+//        println("\n4. Object Operations:")
+//        println(createObjectOperations().printDetailed())
+//
+//        println("\n5. Function Call:")
+//        println(createFunctionCall().printDetailed())
+//
+//        println("\n6. Array Operations:")
+//        println(createArrayOperations().printDetailed())
+//
+//        println("\n7. Constant Folding Example:")
+//        runOptimizations(createConstantFoldingExample())
 
         println("\n8. Dead Code Elimination Example:")
         runOptimizations(createDeadCodeExample())
 
-        println("\n" + "=".repeat(60))
-        println("Examples completed!")
-        println("=".repeat(60))
+//        println("\n" + "=".repeat(60))
+//        println("Examples completed!")
+//        println("=".repeat(60))
     }
 }

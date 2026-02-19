@@ -18,43 +18,55 @@ class DeadCodeElimination : FunctionPass {
     
     override fun run(function: SSAFunction): PassResult {
         var modified = false
-        val worklist = mutableListOf<Instruction>()
+        var totalRemoved = 0
         
-        // 收集所有可能有副作用的指令到工作列表
-        function.instructions().forEach { inst ->
-            // 如果指令有副作用、是终止指令、或者被使用，则视为活代码
-            if (!inst.isPure() || inst.isTerminator() || inst.hasUsers()) {
-                markLive(inst, worklist)
-            }
-        }
-        
-        // 迭代标记活代码
-        while (worklist.isNotEmpty()) {
-            val inst = worklist.removeAt(worklist.size - 1)
+        // 多轮消除，直到没有可消除的指令
+        while (true) {
+            val liveInstructions = mutableSetOf<Instruction>()
+            val worklist = mutableListOf<Instruction>()
             
-            // 标记操作数为活代码
-            inst.getOperands().forEach { operand ->
-                if (operand is Instruction) {
-                    markLive(operand, worklist)
+            // 收集所有可能有副作用或是终止指令的指令到工作列表
+            // 注意：这里不再使用 hasUsers() 作为初始条件！
+            function.instructions().forEach { inst ->
+                // 只有副作用或终止指令才是活的根
+                if (!inst.isPure() || inst.isTerminator()) {
+                    markLive(inst, liveInstructions, worklist)
                 }
             }
-        }
-        
-        // 收集并移除死代码
-        val deadInstructions = mutableListOf<Instruction>()
-        function.instructions().forEach { inst ->
-            if (canRemove(inst)) {
-                deadInstructions.add(inst)
+            
+            // 迭代标记活代码：从活的指令出发，标记它们依赖的操作数
+            while (worklist.isNotEmpty()) {
+                val inst = worklist.removeAt(worklist.size - 1)
+                
+                // 标记操作数为活代码
+                inst.getOperands().forEach { operand ->
+                    if (operand is Instruction) {
+                        markLive(operand, liveInstructions, worklist)
+                    }
+                }
             }
-        }
-        
-        // 移除死代码
-        deadInstructions.forEach { inst ->
-            if (canRemove(inst)) {
+            
+            // 收集本轮的死代码
+            val deadInstructions = mutableListOf<Instruction>()
+            function.instructions().forEach { inst ->
+                if (canRemove(inst, liveInstructions)) {
+                    deadInstructions.add(inst)
+                }
+            }
+            
+            // 本轮没有可消除的指令，结束循环
+            if (deadInstructions.isEmpty()) {
+                break
+            }
+            
+            // 移除死代码
+            deadInstructions.forEach { inst ->
                 inst.dropOperands()
                 inst.eraseFromBlock()
                 modified = true
             }
+            
+            totalRemoved += deadInstructions.size
         }
         
         // 清理空块
@@ -65,26 +77,25 @@ class DeadCodeElimination : FunctionPass {
             }
         }
         
-        return PassResult.Success(modified, "Removed ${deadInstructions.size} dead instructions")
+        return PassResult.Success(modified, "Removed $totalRemoved dead instructions")
     }
     
-    private val liveInstructions = mutableSetOf<Instruction>()
-    
-    private fun markLive(inst: Instruction, worklist: MutableList<Instruction>) {
+    private fun markLive(
+        inst: Instruction, 
+        liveInstructions: MutableSet<Instruction>,
+        worklist: MutableList<Instruction>
+    ) {
         if (liveInstructions.add(inst) && inst !in worklist) {
             worklist.add(inst)
         }
     }
     
-    private fun canRemove(inst: Instruction): Boolean {
+    private fun canRemove(inst: Instruction, liveInstructions: Set<Instruction>): Boolean {
         // 不能移除终止指令
         if (inst.isTerminator()) return false
         
         // 不能移除有副作用的指令
         if (!inst.isPure()) return false
-        
-        // 不能移除被使用的指令
-        if (inst.hasUsers()) return false
         
         // 不能移除已标记为活代码的指令
         if (inst in liveInstructions) return false
@@ -95,6 +106,8 @@ class DeadCodeElimination : FunctionPass {
 
 /**
  * Aggressive Dead Code Elimination - 更激进的版本
+ * 
+ * 结合控制流分析，移除不可达块中的代码
  */
 class AggressiveDeadCodeElimination : FunctionPass {
     
@@ -104,12 +117,25 @@ class AggressiveDeadCodeElimination : FunctionPass {
     override fun run(function: SSAFunction): PassResult {
         var modified = false
         
-        // 标记所有控制依赖为活代码
+        // 第一步：移除不可达块
+        modified = removeUnreachableBlocks(function)
+        
+        // 第二步：运行普通DCE（已包含多轮迭代）
+        val dce = DeadCodeElimination()
+        val dceResult = dce.run(function)
+        
+        return PassResult.Success(
+            modified || (dceResult as? PassResult.Success)?.modified ?: false,
+            "Aggressive DCE completed"
+        )
+    }
+    
+    private fun removeUnreachableBlocks(function: SSAFunction): Boolean {
+        var modified = false
         val liveBlocks = mutableSetOf<BasicBlock>()
         val worklist = ArrayDeque<BasicBlock>()
         
-        // 从出口块开始（反向传播活代码）
-        // 简化版：标记所有可达块
+        // 从入口块开始标记可达块
         worklist.add(function.entryBlock)
         while (worklist.isNotEmpty()) {
             val block = worklist.removeFirst()
@@ -121,24 +147,14 @@ class AggressiveDeadCodeElimination : FunctionPass {
         // 移除不可达块中的所有指令
         function.blocks().forEach { block ->
             if (block !in liveBlocks) {
-                // 不可达块，可以移除所有非终止指令
                 block.instructions().toList().forEach { inst ->
-                    if (!inst.isTerminator()) {
-                        inst.dropOperands()
-                        block.erase(inst)
-                        modified = true
-                    }
+                    inst.dropOperands()
+                    block.erase(inst)
+                    modified = true
                 }
             }
         }
         
-        // 运行普通DCE
-        val dce = DeadCodeElimination()
-        val dceResult = dce.run(function)
-        
-        return PassResult.Success(
-            modified || (dceResult as? PassResult.Success)?.modified ?: false,
-            "Aggressive DCE completed"
-        )
+        return modified
     }
 }

@@ -80,9 +80,7 @@ class AddInst(
     left: Value,
     right: Value,
     type: Type = left.type
-) : BinaryInstruction(Opcode.ADD, type, left, right) {
-    override fun mayThrow(): Boolean = true  // JavaScript加法可能抛出
-}
+) : BinaryInstruction(Opcode.ADD, type, left, right)
 
 /**
  * 减法指令
