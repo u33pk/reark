@@ -1,6 +1,6 @@
-import com.orz.reark.core.frontend.AccumulatorLowering
-import com.orz.reark.core.frontend.BinaryOp
-import com.orz.reark.core.frontend.IRBuilder
+import com.orz.reark.core.ir.AccumulatorLowering
+import com.orz.reark.core.ir.BinaryOp
+import com.orz.reark.core.ir.IRBuilder
 import com.orz.reark.core.ir.Module
 import com.orz.reark.core.ir.Type
 import com.orz.reark.core.ir.anyType
@@ -11,7 +11,6 @@ import com.orz.reark.core.pass.PassManager
 import com.orz.reark.core.pass.transform.AggressiveDeadCodeElimination
 import com.orz.reark.core.pass.transform.AlgebraicSimplification
 import com.orz.reark.core.pass.transform.ConstantFolding
-import com.orz.reark.core.pass.transform.DeadCodeElimination
 import com.orz.reark.core.pass.transform.SimplifyCFG
 
 /**

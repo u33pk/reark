@@ -1,12 +1,4 @@
-package com.orz.reark.core.frontend
-
-import com.orz.reark.core.ir.BasicBlock
-import com.orz.reark.core.ir.Instruction
-import com.orz.reark.core.ir.Module
-import com.orz.reark.core.ir.Type
-import com.orz.reark.core.ir.Value
-import com.orz.reark.core.ir.anyType
-import com.orz.reark.core.ir.boolType
+package com.orz.reark.core.ir
 
 /**
  * 累加器降低 (Accumulator Lowering)
