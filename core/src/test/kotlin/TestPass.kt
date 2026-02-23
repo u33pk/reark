@@ -16,7 +16,7 @@ import com.orz.reark.core.pass.transform.SimplifyCFG
 /**
  * SSA IR 使用示例和测试
  */
-object Test {
+object TestPass {
 
     /**
      * 示例1: 创建一个简单的加法函数
@@ -285,32 +285,32 @@ object Test {
         println("SSA IR Examples")
         println("=".repeat(60))
 
-//        println("\n1. Simple Add Function:")
-//        println(createAddFunction().printDetailed())
-//
-//        println("\n2. If-Else Function:")
-//        println(createIfElseFunction().printDetailed())
-//
-//        println("\n3. With Accumulator Model:")
-//        println(createWithAccumulator().printDetailed())
-//
-//        println("\n4. Object Operations:")
-//        println(createObjectOperations().printDetailed())
-//
-//        println("\n5. Function Call:")
-//        println(createFunctionCall().printDetailed())
-//
-//        println("\n6. Array Operations:")
-//        println(createArrayOperations().printDetailed())
-//
-//        println("\n7. Constant Folding Example:")
-//        runOptimizations(createConstantFoldingExample())
+        println("\n1. Simple Add Function:")
+        println(createAddFunction().printDetailed())
+
+        println("\n2. If-Else Function:")
+        println(createIfElseFunction().printDetailed())
+
+        println("\n3. With Accumulator Model:")
+        println(createWithAccumulator().printDetailed())
+
+        println("\n4. Object Operations:")
+        println(createObjectOperations().printDetailed())
+
+        println("\n5. Function Call:")
+        println(createFunctionCall().printDetailed())
+
+        println("\n6. Array Operations:")
+        println(createArrayOperations().printDetailed())
+
+        println("\n7. Constant Folding Example:")
+        runOptimizations(createConstantFoldingExample())
 
         println("\n8. Dead Code Elimination Example:")
         runOptimizations(createDeadCodeExample())
 
-//        println("\n" + "=".repeat(60))
-//        println("Examples completed!")
-//        println("=".repeat(60))
+        println("\n" + "=".repeat(60))
+        println("Examples completed!")
+        println("=".repeat(60))
     }
 }

@@ -314,6 +314,11 @@ class IRBuilder(
     fun createBitCast(value: Value, type: Type, name: String = ""): Value =
         insert(BitCastInst(value, type, name), name)
     
+    // ==================== 其他 ====================
+    
+    fun createNop(): Instruction =
+        insert(NopInst())
+    
     // ==================== 常量 ====================
     
     fun getConstantInt(value: Long, type: Type = i64Type): ConstantInt =
@@ -436,7 +441,7 @@ class IRBuilderDSL(private val builder: IRBuilder) {
     fun block(name: String = ""): BasicBlock = builder.createBlock(name)
     fun insertPoint(block: BasicBlock) = builder.setInsertPoint(block)
     fun currentBlock(): BasicBlock? = builder.currentBlock
-    fun currentFunc(): SSAFunction? = builder.currentFunction
+    fun currentFunc(): com.orz.reark.core.ir.Function? = builder.currentFunction
 }
 
 /**
