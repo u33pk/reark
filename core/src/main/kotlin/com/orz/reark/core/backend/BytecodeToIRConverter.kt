@@ -83,39 +83,41 @@ class BytecodeToIRConverter(private val module: Module) {
     ) {
         // 分析控制流
         val blockBoundaries = ControlFlowAnalyzer.analyzeBlockBoundaries(instructions)
-        
+
         // 创建基本块
         val blockMap = mutableMapOf<Int, BasicBlock>()
         for (offset in blockBoundaries.sorted()) {
             blockMap[offset] = function.createBlock("bb_$offset")
         }
-        
+
+        // 首先建立 CFG 边 (前驱/后继关系)
+        establishCFGEdges(instructions, blockMap)
+
         // 设置入口块和构建器
         val entryBlock = blockMap[instructions[0].offset] ?: function.createBlock("entry")
         val builder = IRBuilder(entryBlock)
-        
-        // 创建 SSA 构造上下文
-        val context = SSAConstructionContext(builder, module)
-        
+
+        // 创建 SSA 构造上下文，传入 blockMap 以便指令转换器可以使用预创建的块
+        val context = SSAConstructionContext(builder, module, blockMap)
+
         // 设置参数寄存器映射
         if (paramCount > 0) {
             context.registerMapper.setupArgumentRegisters(function.arguments())
         }
-        
+
         // 转换指令
         var currentBlock: BasicBlock = entryBlock
+        // 首先设置初始块的上下文
+        context.setCurrentBlock(currentBlock)
+
         for (inst in instructions) {
             // 检查是否需要切换基本块
             val targetBlock = blockMap[inst.offset]
             if (targetBlock != null && targetBlock != currentBlock) {
                 currentBlock = targetBlock
                 context.setCurrentBlock(currentBlock)
-                
-                if (inst.offset in blockBoundaries) {
-                    context.sealBlock(currentBlock)
-                }
             }
-            
+
             // 转换单条指令
             try {
                 convertInstruction(inst, context)
@@ -123,10 +125,86 @@ class BytecodeToIRConverter(private val module: Module) {
                 errors.add("Failed to convert instruction at offset 0x${inst.offset.toString(16)}: ${e.message}\n")
             }
         }
-        
-        // 密封所有基本块
-        for (block in function.blocks()) {
+
+        // 后处理：为没有终止指令的块添加 fall-through 跳转
+        // 如果一个块没有终止指令但有后继块，添加无条件跳转到第一个后继
+        for (block in function.blocks().toList()) {
+            if (!block.isTerminated() && block.successors().isNotEmpty()) {
+                // 跳转到第一个后继块
+                val targetBlock = block.successors()[0]
+                context.builder.setInsertPoint(block)
+                context.builder.createBr(targetBlock)
+            } else if (!block.isTerminated()) {
+                // 没有后继，添加 ret void
+                context.builder.setInsertPoint(block)
+                context.builder.createRetVoid()
+            }
+        }
+
+        // 密封所有基本块 - 这是关键步骤，确保所有基本块都被正确密封
+        // 按照支配顺序密封块（简单起见，这里按块 ID 顺序）
+        val blocksInOrder = function.blocks().sortedBy { it.id }
+        for (block in blocksInOrder) {
             context.registerMapper.sealBlock(block)
+        }
+    }
+
+    /**
+     * 建立基本块之间的控制流边
+     */
+    private fun establishCFGEdges(
+        instructions: List<PandaAsmParser.ParsedInstruction>,
+        blockMap: Map<Int, BasicBlock>
+    ) {
+        // 辅助函数：找到指令所属的块（块的起始 offset <= 指令 offset）
+        fun findBlockForOffset(offset: Int): BasicBlock? {
+            val blockOffset = blockMap.keys.filter { it <= offset }.maxOrNull()
+            return blockOffset?.let { blockMap[it] }
+        }
+
+        for ((index, inst) in instructions.withIndex()) {
+            val currentBlock = findBlockForOffset(inst.offset)
+            if (currentBlock == null) {
+                continue
+            }
+
+            val isJump = ControlFlowAnalyzer.isJumpInstruction(inst)
+            val isTerminator = ControlFlowAnalyzer.isTerminatorInstruction(inst)
+
+            // 检查是否为跳转指令
+            if (isJump) {
+                val jumpTarget = ControlFlowAnalyzer.calculateJumpTarget(inst)
+                if (jumpTarget != null) {
+                    val targetBlock = blockMap[jumpTarget]
+                    if (targetBlock != null) {
+                        currentBlock.addSuccessor(targetBlock)
+                    }
+                }
+
+                // 只有条件跳转才有 fall-through 块
+                // 无条件跳转 (JMP, JMP_16, JMP_32) 没有 fall-through
+                val isUnconditionalJump = PandaAsmOpcodes.StandardOpcode.fromByte(inst.opcode) in listOf(
+                    PandaAsmOpcodes.StandardOpcode.JMP,
+                    PandaAsmOpcodes.StandardOpcode.JMP_16,
+                    PandaAsmOpcodes.StandardOpcode.JMP_32
+                )
+
+                if (!isUnconditionalJump) {
+                    // fall-through 是下一条指令所属的块
+                    if (index + 1 < instructions.size) {
+                        val nextInstOffset = instructions[index + 1].offset
+                        val fallThroughBlock = findBlockForOffset(nextInstOffset)
+                        if (fallThroughBlock != null && fallThroughBlock != currentBlock) {
+                            currentBlock.addSuccessor(fallThroughBlock)
+                        }
+                    }
+                }
+            } else if (isTerminator) {
+                // 终止指令没有后继
+                // 不做任何操作
+            } else {
+                // 普通指令：不需要添加边，因为块内的指令天然属于同一个块
+            }
         }
     }
     

@@ -85,12 +85,24 @@ object ControlFlowAnalyzer {
     
     /**
      * 计算跳转目标
+     * 注意：PandaASM 的跳转偏移是相对于指令起始位置的，不需要加指令长度
      */
     fun calculateJumpTarget(inst: PandaAsmParser.ParsedInstruction): Int? {
         val offset = when (val operand = inst.operands.firstOrNull()) {
             is PandaAsmParser.Operand.JumpOffset -> operand.offset
             else -> return null
         }
+
+        // 跳转目标 = 当前指令偏移 + 跳转偏移
+        // PandaASM 的跳转偏移是相对于指令起始位置的
         return inst.offset + offset
+    }
+    
+    /**
+     * 计算指令长度
+     */
+    fun calculateInstructionLength(inst: PandaAsmParser.ParsedInstruction): Int {
+        // rawBytes 已经包含了操作码和操作数
+        return inst.rawBytes.size
     }
 }

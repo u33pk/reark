@@ -219,7 +219,15 @@ object StandardInstructionConverter {
             PandaAsmOpcodes.StandardOpcode.JMP,
             PandaAsmOpcodes.StandardOpcode.JMP_16,
             PandaAsmOpcodes.StandardOpcode.JMP_32 -> {
-                builder.createUnreachable()
+                // 无条件跳转
+                val jumpOffset = (inst.operands.firstOrNull() as? PandaAsmParser.Operand.JumpOffset)?.offset ?: 0
+                // PandaASM 的跳转偏移是相对于指令起始位置的
+                val jumpTarget = inst.offset + jumpOffset
+                val targetBlock = context.getBlockByOffset(jumpTarget)
+                    ?: context.getCurrentFunction()?.createBlock("jmp_$jumpTarget")
+                if (targetBlock != null) {
+                    context.builder.createBr(targetBlock)
+                }
             }
             PandaAsmOpcodes.StandardOpcode.JEQZ,
             PandaAsmOpcodes.StandardOpcode.JEQZ_16,
@@ -253,11 +261,19 @@ object StandardInstructionConverter {
         opcode: PandaAsmOpcodes.StandardOpcode
     ) {
         val builder = context.builder
-        val reg = inst.operands.getOrNull(1) as? PandaAsmParser.Operand.Register8
-            ?: throw IllegalArgumentException("Expected register operand")
+        // 二元运算指令格式: op_imm_8_v_8
+        // 第一个操作数是立即数(IC槽索引)，第二个操作数是寄存器
+        if (inst.operands.size < 2) {
+            throw IllegalArgumentException("Binary operation requires 2 operands, got ${inst.operands.size}")
+        }
+
+        val imm = inst.operands[0]
+        val reg = inst.operands[1] as? PandaAsmParser.Operand.Register8
+            ?: throw IllegalArgumentException("Expected register operand at index 1, got ${inst.operands[1]}")
+
         val rightValue = context.registerMapper.readRegister(reg.regNum)
-            ?: throw IllegalStateException("Register v${reg.regNum} not defined")
-        
+            ?: throw IllegalStateException("Register v${reg.regNum} not defined. Available registers: ${context.registerMapper.getUsedRegisters()}")
+
         val leftValue = context.getAccumulator()
         val result = when (opcode) {
             PandaAsmOpcodes.StandardOpcode.ADD2 -> builder.createAdd(leftValue, rightValue)
@@ -272,7 +288,7 @@ object StandardInstructionConverter {
             PandaAsmOpcodes.StandardOpcode.OR2 -> builder.createOr(leftValue, rightValue)
             PandaAsmOpcodes.StandardOpcode.XOR2 -> builder.createXor(leftValue, rightValue)
             PandaAsmOpcodes.StandardOpcode.EXP -> builder.createExp(leftValue, rightValue)
-            else -> throw IllegalStateException("Unexpected opcode")
+            else -> throw IllegalStateException("Unexpected opcode: $opcode")
         }
         context.setAccumulator(result)
     }
@@ -283,12 +299,21 @@ object StandardInstructionConverter {
         opcode: PandaAsmOpcodes.StandardOpcode
     ) {
         val builder = context.builder
-        val reg = inst.operands.getOrNull(1) as? PandaAsmParser.Operand.Register8
-            ?: throw IllegalArgumentException("Expected register operand")
+        // 二元运算和比较指令格式: op_imm_8_v_8
+        // 第一个操作数是立即数(IC槽索引)，第二个操作数是寄存器
+        if (inst.operands.size < 2) {
+            throw IllegalArgumentException("Comparison instruction requires 2 operands, got ${inst.operands.size}")
+        }
+
+        val imm = inst.operands[0]
+        val reg = inst.operands[1] as? PandaAsmParser.Operand.Register8
+            ?: throw IllegalArgumentException("Expected register operand at index 1, got ${inst.operands[1]}")
+
         val rightValue = context.registerMapper.readRegister(reg.regNum)
-            ?: throw IllegalStateException("Register v${reg.regNum} not defined")
-        
+            ?: throw IllegalStateException("Register v${reg.regNum} not defined. Available registers: ${context.registerMapper.getUsedRegisters()}")
+
         val leftValue = context.getAccumulator()
+
         val result = when (opcode) {
             PandaAsmOpcodes.StandardOpcode.EQ -> builder.createICmpEQ(leftValue, rightValue)
             PandaAsmOpcodes.StandardOpcode.NOTEQ -> builder.createICmpNE(leftValue, rightValue)
@@ -298,7 +323,7 @@ object StandardInstructionConverter {
             PandaAsmOpcodes.StandardOpcode.GREATEREQ -> builder.createICmpSGE(leftValue, rightValue)
             PandaAsmOpcodes.StandardOpcode.STRICTEQ -> builder.createStrictEq(leftValue, rightValue)
             PandaAsmOpcodes.StandardOpcode.STRICTNOTEQ -> builder.createStrictNe(leftValue, rightValue)
-            else -> throw IllegalStateException("Unexpected opcode")
+            else -> throw IllegalStateException("Unexpected opcode: $opcode")
         }
         context.setAccumulator(result)
     }
@@ -399,10 +424,17 @@ object StandardInstructionConverter {
     }
     
     private fun convertCallThis1(inst: PandaAsmParser.ParsedInstruction, context: SSAConstructionContext) {
-        val reg1 = inst.operands.getOrNull(1) as? PandaAsmParser.Operand.Register8
-            ?: throw IllegalArgumentException("Expected register operand")
-        val reg2 = inst.operands.getOrNull(2) as? PandaAsmParser.Operand.Register8
-            ?: throw IllegalArgumentException("Expected register operand")
+        // callthis1格式: imm8 + v(this) + v(arg1)
+        if (inst.operands.size < 3) {
+            throw IllegalArgumentException("callthis1 requires 3 operands, got ${inst.operands.size}")
+        }
+
+        val imm = inst.operands[0]
+        val reg1 = inst.operands[1] as? PandaAsmParser.Operand.Register8
+            ?: throw IllegalArgumentException("Expected register operand at index 1 for 'this', got ${inst.operands[1]}")
+        val reg2 = inst.operands[2] as? PandaAsmParser.Operand.Register8
+            ?: throw IllegalArgumentException("Expected register operand at index 2 for arg1, got ${inst.operands[2]}")
+
         val thisValue = context.registerMapper.readRegister(reg1.regNum)
             ?: throw IllegalStateException("Register v${reg1.regNum} not defined")
         val arg = context.registerMapper.readRegister(reg2.regNum)
@@ -451,9 +483,23 @@ object StandardInstructionConverter {
     
     private fun convertConditionalBranch(inst: PandaAsmParser.ParsedInstruction, context: SSAConstructionContext) {
         val cond = context.getAccumulator()
-        val func = context.getCurrentFunction() ?: throw IllegalStateException("No current function")
-        val trueBlock = func.createBlock("jmp_true_${inst.offset}")
-        val falseBlock = func.createBlock("jmp_false_${inst.offset}")
-        context.builder.createCondBr(cond, trueBlock, falseBlock)
+        
+        // 计算跳转目标（PandaASM 的偏移量是相对于指令起始位置的）
+        val jumpOffset = (inst.operands.firstOrNull() as? PandaAsmParser.Operand.JumpOffset)?.offset ?: 0
+        val jumpTarget = inst.offset + jumpOffset
+        
+        // 获取预创建的目标块和 fall-through 块
+        // 注意：JEQZ 是"等于零跳转"，所以跳转目标是条件为假 (cond==0) 时的目标
+        val falseBlock = context.getBlockByOffset(jumpTarget)
+            ?: context.getCurrentFunction()?.createBlock("jmp_false_$jumpTarget")
+        // fall-through 块是下一条指令的块（条件为真时的目标）
+        val instLength = ControlFlowAnalyzer.calculateInstructionLength(inst)
+        val fallThroughOffset = inst.offset + instLength
+        val trueBlock = context.getBlockByOffset(fallThroughOffset)
+            ?: context.getCurrentFunction()?.createBlock("jmp_true_${inst.offset}")
+        
+        if (trueBlock != null && falseBlock != null) {
+            context.builder.createCondBr(cond, trueBlock, falseBlock)
+        }
     }
 }

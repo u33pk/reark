@@ -1,6 +1,0 @@
-export ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
-export ANTHROPIC_AUTH_TOKEN=sk-5702e6010c1a4a8aa0eee15bac16a475
-export API_TIMEOUT_MS=600000
-export ANTHROPIC_MODEL=deepseek-chat
-export ANTHROPIC_SMALL_FAST_MODEL=deepseek-chat
-export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1

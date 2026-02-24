@@ -9,6 +9,7 @@ import com.orz.reark.core.pass.transform.SimplifyCFG
 import me.yricky.oh.abcd.AbcBuf
 import me.yricky.oh.abcd.cfm.AbcClass
 import me.yricky.oh.abcd.decompiler.ToJs
+import me.yricky.oh.common.toByteArray
 import me.yricky.oh.common.wrapAsLEByteBuf
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -71,26 +72,19 @@ object TestAbc {
             val file = File("/home/orz/data/unitTest/test.abc")
         val mmap = FileChannel.open(file.toPath()).map(FileChannel.MapMode.READ_ONLY,0,file.length())
         val abc = AbcBuf("", wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
-
+        println("asdf5")
         abc.classes.forEach { off, item ->
             if(item is AbcClass){
                 println("[C]" + item.name)
 
                 item.methods.forEach {
-                    val builder = ByteArrayBuilder()
                     println("\t [M] " + it.name)
-                    var off = 0;
-                    it.codeItem?.asm?.list?.forEach { asmItem ->
-                        val opbs = asmItem.opUnits.map { it.toByte() }.toByteArray()
-                        print("0x" + off.toHexString() + "  ")
-                        off += asmItem.opUnits.size
-                        print(asmItem.opUnits)
-                        println("  " + asmItem)
-                        builder.append(opbs)
+                    val result = it.codeItem?.instructions?.toByteArray()
+
+                    if (result != null) {
+                        println("Raw bytecode hex: " + result.joinToString(" ") { "%02x".format(it) })
+                        fullOptimizationPipeline(result)
                     }
-                    val result = builder.toByteArray()
-                    println(result.contentToString())
-                    fullOptimizationPipeline(result)
                 }
 
             }

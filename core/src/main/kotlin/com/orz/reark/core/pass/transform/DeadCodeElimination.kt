@@ -136,6 +136,10 @@ class AggressiveDeadCodeElimination : FunctionPass {
         val worklist = ArrayDeque<BasicBlock>()
         
         // 从入口块开始标记可达块
+        // 检查函数是否有基本块（入口块是第一个基本块）
+        if (function.blocks().isEmpty()) {
+            return false
+        }
         worklist.add(function.entryBlock)
         while (worklist.isNotEmpty()) {
             val block = worklist.removeFirst()
@@ -144,15 +148,17 @@ class AggressiveDeadCodeElimination : FunctionPass {
             }
         }
         
-        // 移除不可达块中的所有指令
-        function.blocks().forEach { block ->
-            if (block !in liveBlocks) {
-                block.instructions().toList().forEach { inst ->
-                    inst.dropOperands()
-                    block.erase(inst)
-                    modified = true
-                }
+        // 移除不可达块
+        val unreachableBlocks = function.blocks().filter { it !in liveBlocks }
+        for (block in unreachableBlocks) {
+            // 先清除块中的所有指令
+            block.instructions().toList().forEach { inst ->
+                inst.dropOperands()
+                block.erase(inst)
             }
+            // 然后从函数中移除块
+            function.removeBlock(block)
+            modified = true
         }
         
         return modified

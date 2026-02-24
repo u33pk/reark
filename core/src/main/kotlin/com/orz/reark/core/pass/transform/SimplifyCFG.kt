@@ -80,36 +80,48 @@ class SimplifyCFG : FunctionPass {
      */
     private fun mergeBlocks(function: SSAFunction): Boolean {
         var modified = false
-        
+
         for (block in function.blocks().toList()) {
             // 检查块是否只有一个后继
             val succs = block.successors()
             if (succs.size != 1) continue
-            
+
             val succ = succs[0]
             // 检查后继是否只有一个前驱且不是入口块
             if (succ.predecessorCount() != 1 || succ == function.entryBlock) continue
-            
+
+            // 额外检查：确保 succ 仍然属于函数
+            if (succ.parent != function) continue
+
             // 可以合并
-            // 1. 移动后继的所有指令到当前块
+            // 1. 移除当前块的终止指令（br 等）
+            val terminator = block.terminator()
+            if (terminator != null) {
+                block.remove(terminator)
+                terminator.dropOperands()
+            }
+
+            // 2. 移动后继的所有指令到当前块
             succ.instructions().toList().forEach { inst ->
                 succ.remove(inst)
                 block.append(inst)
             }
-            
-            // 2. 转移后继的后继到当前块
-            succ.successors().toList().forEach { next ->
+
+            // 3. 转移后继的后继到当前块
+            for (next in succ.successors().toList()) {
+                // 先移除 succ 到 next 的边
                 succ.removeSuccessor(next)
+                // 然后添加 block 到 next 的边
                 block.addSuccessor(next)
             }
-            
-            // 3. 移除后继
+
+            // 4. 移除后继（此时 succ 应该没有前驱了）
             function.removeBlock(succ)
-            
+
             modified = true
             break // 重新开始（迭代器可能已失效）
         }
-        
+
         return modified
     }
     
@@ -185,7 +197,7 @@ class SimplifyCFG : FunctionPass {
             
             // 避免无限循环
             if (target == block) continue
-            
+
             // 更新所有前驱
             val preds = block.predecessors().toList()
             for (pred in preds) {

@@ -310,6 +310,54 @@ class AlgebraicSimplification : FunctionPass {
                         modified = true
                     }
                 }
+                is EqInst -> {
+                    // x == x = true
+                    if (inst.left == inst.right) {
+                        inst.replaceAllUsesWith(ConstantInt.bool(true))
+                        inst.eraseFromBlock()
+                        modified = true
+                    }
+                }
+                is NeInst -> {
+                    // x != x = false
+                    if (inst.left == inst.right) {
+                        inst.replaceAllUsesWith(ConstantInt.bool(false))
+                        inst.eraseFromBlock()
+                        modified = true
+                    }
+                }
+                is LtInst -> {
+                    // x < x = false
+                    if (inst.left == inst.right) {
+                        inst.replaceAllUsesWith(ConstantInt.bool(false))
+                        inst.eraseFromBlock()
+                        modified = true
+                    }
+                }
+                is LeInst -> {
+                    // x <= x = true
+                    if (inst.left == inst.right) {
+                        inst.replaceAllUsesWith(ConstantInt.bool(true))
+                        inst.eraseFromBlock()
+                        modified = true
+                    }
+                }
+                is GtInst -> {
+                    // x > x = false
+                    if (inst.left == inst.right) {
+                        inst.replaceAllUsesWith(ConstantInt.bool(false))
+                        inst.eraseFromBlock()
+                        modified = true
+                    }
+                }
+                is GeInst -> {
+                    // x >= x = true
+                    if (inst.left == inst.right) {
+                        inst.replaceAllUsesWith(ConstantInt.bool(true))
+                        inst.eraseFromBlock()
+                        modified = true
+                    }
+                }
                 is DivInst -> {
                     // x / 1 = x
                     val right = inst.right
