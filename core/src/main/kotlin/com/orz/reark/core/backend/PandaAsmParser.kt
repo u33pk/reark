@@ -236,10 +236,12 @@ class PandaAsmParser(private val bytecode: ByteArray) {
                 listOf(Operand.Immediate8(imm), Operand.Register8(reg))
             }
 
-            // 8 位寄存器 (一元运算指令)
+            // 8 位立即数 (一元运算指令 - IC 槽索引)
             // not(0x20), inc(0x21), dec(0x22), istrue(0x23), isfalse(0x24)
             // typeof(0x1C), tonumber(0x1D), tonumeric(0x1E)
-            0x1C, 0x1D, 0x1E, 0x20, 0x21, 0x22, 0x23, 0x24 -> listOf(Operand.Register8(readUnsignedByte()))
+            // 这些指令的格式是 op_imm_8，操作数是 IC 槽索引，不是寄存器
+            // acc: inout:top 表示从累加器读取输入并将结果写入累加器
+            0x1C, 0x1D, 0x1E, 0x20, 0x21, 0x22, 0x23, 0x24 -> listOf(Operand.Immediate8(readUnsignedByte()))
 
             // 32 位立即数 (ldai)
             0x62 -> listOf(Operand.Immediate32(readInt()))

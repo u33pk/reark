@@ -5,14 +5,14 @@ import com.orz.reark.core.ir.Function as SSAFunction
 
 /**
  * 寄存器到 SSA 值的映射管理器
- * 
+ *
  * 处理 PandaASM 虚拟寄存器到 SSA 值的映射，包括：
  * 1. 寄存器值的版本控制（SSA 形式）
  * 2. PHI 节点的生成（用于合并来自不同路径的寄存器值）
  * 3. 基本块之间的寄存器状态传递
  */
 class RegisterToSSAMapper {
-    
+
     /**
      * 寄存器状态 - 记录单个寄存器的 SSA 值
      */
@@ -21,7 +21,7 @@ class RegisterToSSAMapper {
         var currentValue: Value,
         var currentType: Type = currentValue.type
     )
-    
+
     /**
      * 基本块状态 - 记录进入基本块时的寄存器状态
      */
@@ -31,30 +31,36 @@ class RegisterToSSAMapper {
         val isSealed: Boolean = false  // 是否已封闭（所有前驱已知）
     )
     
+    /**
+     * 跟踪每个块中寄存器的最后写入值
+     * 用于 PHI 节点正确获取前驱块的值
+     */
+    private val blockFinalValues = mutableMapOf<BasicBlock, MutableMap<Int, Value>>()
+
     // 当前寄存器状态
     private val registerStates = mutableMapOf<Int, RegisterState>()
-    
+
     // 基本块寄存器状态映射
     private val blockStates = mutableMapOf<BasicBlock, BlockRegisterState>()
-    
+
     // 未封闭的基本块（等待 PHI 节点生成）
     private val incompletePhis = mutableMapOf<BasicBlock, MutableMap<Int, PhiInst>>()
-    
+
     // 当前基本块
     private var currentBlock: BasicBlock? = null
-    
+
     /**
      * 设置当前基本块
      */
     fun setCurrentBlock(block: BasicBlock) {
         currentBlock = block
     }
-    
+
     /**
      * 获取当前基本块
      */
     fun getCurrentBlock(): BasicBlock? = currentBlock
-    
+
     /**
      * 写入寄存器值
      *
@@ -63,12 +69,15 @@ class RegisterToSSAMapper {
      * @param type 值类型（可选，默认使用 value.type）
      */
     fun writeRegister(registerNum: Int, value: Value, type: Type = value.type) {
+        // 更新全局寄存器状态
         val state = RegisterState(registerNum, value, type)
         registerStates[registerNum] = state
 
         // 更新当前基本块的状态
         currentBlock?.let { block ->
             getOrCreateBlockState(block).registerStates[registerNum] = value
+            // 同时更新块中寄存器的最后写入值
+            blockFinalValues.getOrPut(block) { mutableMapOf() }[registerNum] = value
         }
     }
 
@@ -79,20 +88,44 @@ class RegisterToSSAMapper {
      * @return SSA 值，如果未定义则返回 null
      */
     fun readRegister(registerNum: Int): Value? {
-        // 首先检查当前寄存器状态
-        registerStates[registerNum]?.let {
-            return it.currentValue
+        // 首先检查当前块的状态（块内定义）
+        currentBlock?.let { block ->
+            val blockState = blockStates[block]
+            if (blockState != null && blockState.registerStates.containsKey(registerNum)) {
+                return blockState.registerStates[registerNum]
+            }
         }
 
-        // 如果当前块有状态，从块状态读取
+        // 对于多前驱块，尝试从块的状态系统中获取（可能涉及 PHI 节点）
         currentBlock?.let { block ->
-            return readRegisterInBlock(registerNum, block)
+            val predecessors = block.predecessors()
+            if (predecessors.size > 1) {
+                // 多前驱块，需要 PHI 节点
+                val result = readRegisterInBlock(registerNum, block)
+                if (result != null) {
+                    return result
+                }
+            } else if (predecessors.size == 1) {
+                // 单前驱块，直接从前驱或全局状态获取
+                val predBlock = predecessors.firstOrNull()
+                if (predBlock != null) {
+                    val predState = blockStates[predBlock]
+                    if (predState != null && predState.registerStates.containsKey(registerNum)) {
+                        return predState.registerStates[registerNum]
+                    }
+                }
+            }
+        }
+
+        // 检查全局寄存器状态
+        registerStates[registerNum]?.let {
+            return it.currentValue
         }
 
         // 如果寄存器完全未定义，返回 null
         return null
     }
-    
+
     // 用于检测循环的线程局部变量
     private val visitingBlocks = ThreadLocal.withInitial { mutableSetOf<BasicBlock>() }
 
@@ -114,8 +147,15 @@ class RegisterToSSAMapper {
         // 检测循环依赖，避免无限递归
         val visiting = visitingBlocks.get()
         if (block in visiting) {
-            // 检测到循环，返回 null
-            return null
+            // 检测到循环，尝试从全局状态获取值
+            // 或者返回该块中已有的 PHI 节点
+            val existingPhi = incompletePhis[block]?.get(registerNum)
+            if (existingPhi != null) {
+                return existingPhi
+            }
+            // 如果没有 PHI 节点，尝试从全局状态获取
+            // 这对于在循环中使用的寄存器（如 v0, v1）是必要的
+            return registerStates[registerNum]?.currentValue
         }
 
         // 标记为正在访问
@@ -135,44 +175,69 @@ class RegisterToSSAMapper {
                 // 只有一个前驱，直接递归获取
                 predecessors.size == 1 -> {
                     val predBlock = predecessors[0]
+                    // 先尝试从前驱块获取
                     val predValue = readRegisterInBlock(registerNum, predBlock)
-                    predValue?.let {
+                    if (predValue != null) {
                         // 缓存到当前块
-                        getOrCreateBlockState(block).registerStates[registerNum] = it
+                        getOrCreateBlockState(block).registerStates[registerNum] = predValue
+                        return predValue
                     }
-                    predValue
+                    // 前驱块没有，尝试从前驱的全局状态获取
+                    val globalValue = registerStates[registerNum]?.currentValue
+                    if (globalValue != null) {
+                        getOrCreateBlockState(block).registerStates[registerNum] = globalValue
+                        return globalValue
+                    }
+                    return null
                 }
 
                 // 多个前驱，需要 PHI 节点
                 else -> {
-                    // 检查是否所有前驱都能提供该寄存器的值
-                    val allPredsHaveValue = predecessors.all { pred ->
-                        readRegisterInBlock(registerNum, pred) != null
-                    }
+                    // 关键修复：只有当块已被密封时，才进行值比较优化
+                    // 否则，在循环控制流中，所有前驱可能都返回相同的全局状态值
+                    // 导致错误地跳过 PHI 节点创建
+                    val isSealed = blockStates[block]?.isSealed == true
 
-                    if (allPredsHaveValue) {
-                        // 创建 PHI 节点（如果尚未创建）
-                        val phi = incompletePhis[block]?.get(registerNum)
-                            ?: createPhiForRegister(registerNum, block)
-
-                        // 如果块已封闭，填充 PHI 的 incoming
-                        if (blockState?.isSealed == true) {
-                            fillPhiIncoming(phi, registerNum, block)
-                        }
-
-                        phi
-                    } else {
-                        // 如果不是所有前驱都有该寄存器的定义，可能是因为某些分支没有执行到
-                        // 尝试从已经定义的地方获取值，或返回 null
+                    if (isSealed) {
+                        // 块已密封，所有前驱都已处理完毕，可以进行值比较优化
+                        // 收集所有前驱的值
+                        val predValues = mutableListOf<Pair<BasicBlock, Value?>>()
                         for (pred in predecessors) {
                             val predValue = readRegisterInBlock(registerNum, pred)
-                            if (predValue != null) {
-                                return predValue
-                            }
+                            predValues.add(pred to predValue)
                         }
-                        // 如果都没有找到，返回 null
-                        null
+
+                        // 检查是否有前驱有值
+                        val hasValue = predValues.any { it.second != null }
+
+                        if (!hasValue) {
+                            // 所有前驱都没有值，尝试从全局状态获取
+                            return registerStates[registerNum]?.currentValue
+                        }
+
+                        // 检查所有有值的前驱是否有相同的值
+                        val distinctValues = predValues.mapNotNull { it.second }.distinct()
+
+                        // 只有当所有前驱都有相同的值时，才直接使用该值（不需要 PHI）
+                        // 否则需要创建 PHI 节点
+                        if (distinctValues.size == 1 && predValues.all { it.second != null }) {
+                            // 所有前驱都有相同的值，直接使用该值
+                            val value = distinctValues.first()
+                            getOrCreateBlockState(block).registerStates[registerNum] = value
+                            return value
+                        }
                     }
+
+                    // 需要创建 PHI 节点
+                    // 创建 PHI 节点（如果尚未创建）
+                    val phi = incompletePhis[block]?.get(registerNum)
+                        ?: createPhiForRegister(registerNum, block)
+
+                    // 关键修复：不再立即填充 PHI 的 incoming 值
+                    // 而是等待所有块处理完毕后，由 finalizePhiNodes 统一填充
+                    // 这样可以确保获取前驱块中最后写入的值
+
+                    phi
                 }
             }
         } finally {
@@ -180,7 +245,7 @@ class RegisterToSSAMapper {
             visiting.remove(block)
         }
     }
-    
+
     /**
      * 为寄存器创建 PHI 节点
      */
@@ -209,49 +274,60 @@ class RegisterToSSAMapper {
 
         return phi
     }
-    
+
     /**
      * 填充 PHI 节点的 incoming 值
+     *
+     * 关键修复：检查是否已经填充过 incoming 值，避免重复添加
+     * 关键修复 2：使用 blockFinalValues 获取前驱块中最后写入的值，避免循环依赖返回 PHI 本身
      */
     private fun fillPhiIncoming(phi: PhiInst, registerNum: Int, block: BasicBlock) {
-        // 清除现有的 incoming（如果有）
-        // 注意：这里的实现取决于PhiInst的具体API，如果无法清空，则直接添加新的
-        while (phi.incomingCount() > 0) {
-            // PHI 节点不支持移除单个 incoming，需要重新创建
-            // 这里简化处理，假设 PHI 是新的
-            break
+        // 如果已经填充过 incoming 值，跳过，避免重复添加
+        if (phi.incomingCount() > 0) {
+            return
         }
 
-        // 从所有前驱获取值，并且只添加那些有值的incoming
+        // 从所有前驱获取值
+        // 关键修复：使用 blockFinalValues 获取前驱块中最后写入的值
         for (pred in block.predecessors()) {
-            val predValue = readRegisterInBlock(registerNum, pred)
-            if (predValue != null) {
-                phi.addIncoming(predValue, pred)
+            // 首先尝试从 blockFinalValues 获取前驱块中最后写入的值
+            var predValue = blockFinalValues[pred]?.get(registerNum)
+            
+            // 如果 blockFinalValues 中没有，尝试从 blockStates 获取
+            if (predValue == null) {
+                val predState = blockStates[pred]
+                predValue = predState?.registerStates?.get(registerNum)
             }
+            
+            // 如果前驱块没有该寄存器的值，尝试从全局状态获取
+            if (predValue == null) {
+                predValue = registerStates[registerNum]?.currentValue
+            }
+            // 如果还是没有值，使用 undef
+            if (predValue == null) {
+                predValue = UndefValue(anyType)
+            }
+            phi.addIncoming(predValue, pred)
         }
     }
-    
+
     /**
      * 封闭基本块
-     * 
-     * 当所有前驱都已知时调用，完成 PHI 节点的生成
+     *
+     * 当所有前驱都已知时调用，标记块为已封闭
+     * PHI 节点的 incoming 值由 finalizePhiNodes 统一填充
      */
     fun sealBlock(block: BasicBlock) {
         val state = getOrCreateBlockState(block)
         if (state.isSealed) return
-        
+
         // 标记为已封闭
         blockStates[block] = state.copy(isSealed = true)
         
-        // 完成该块的未决 PHI 节点
-        incompletePhis[block]?.let { phis ->
-            for ((registerNum, phi) in phis) {
-                fillPhiIncoming(phi, registerNum, block)
-            }
-            incompletePhis.remove(block)
-        }
+        // 注意：PHI 节点的 incoming 值不再在这里填充
+        // 而是由 finalizePhiNodes 在所有块处理完毕后统一填充
     }
-    
+
     /**
      * 获取或创建基本块状态
      */
@@ -260,53 +336,69 @@ class RegisterToSSAMapper {
             BlockRegisterState(block)
         }
     }
-    
+
     /**
      * 获取基本块状态
      */
     fun getBlockState(block: BasicBlock): BlockRegisterState? = blockStates[block]
-    
+
     /**
      * 清除所有寄存器状态
      */
     fun clear() {
         registerStates.clear()
         blockStates.clear()
+        blockFinalValues.clear()
         incompletePhis.clear()
         currentBlock = null
     }
     
+    /**
+     * 完成所有 PHI 节点的填充
+     * 
+     * 在所有块都处理完毕后调用，确保 PHI 节点正确获取前驱块中最后写入的值
+     */
+    fun finalizePhiNodes() {
+        // 遍历所有未完成的 PHI 节点
+        for ((block, phis) in incompletePhis) {
+            for ((registerNum, phi) in phis) {
+                fillPhiIncoming(phi, registerNum, block)
+            }
+        }
+        incompletePhis.clear()
+    }
+
     /**
      * 检查寄存器是否有定义
      */
     fun hasRegister(registerNum: Int): Boolean {
         return registerStates.containsKey(registerNum)
     }
-    
+
     /**
      * 获取寄存器类型
      */
     fun getRegisterType(registerNum: Int): Type? {
         return registerStates[registerNum]?.currentType
     }
-    
+
     /**
      * 获取所有已使用的寄存器
      */
     fun getUsedRegisters(): Set<Int> = registerStates.keys
-    
+
     /**
      * 复制当前寄存器状态
-     * 
+     *
      * 用于分支前的状态保存
      */
     fun snapshot(): Map<Int, Value> {
         return registerStates.mapValues { it.value.currentValue }
     }
-    
+
     /**
      * 恢复寄存器状态
-     * 
+     *
      * 用于合并分支后的状态恢复
      */
     fun restore(snapshot: Map<Int, Value>) {
@@ -314,10 +406,10 @@ class RegisterToSSAMapper {
             writeRegister(regNum, value)
         }
     }
-    
+
     /**
      * 将当前寄存器状态应用到基本块
-     * 
+     *
      * 用于在基本块开头设置寄存器的初始值
      */
     fun applyToBlock(block: BasicBlock) {
@@ -326,22 +418,22 @@ class RegisterToSSAMapper {
             blockState.registerStates[regNum] = state.currentValue
         }
     }
-    
+
     /**
      * 创建参数寄存器映射
-     * 
+     *
      * 将函数参数映射到寄存器编号
      * PandaASM 约定：参数从寄存器 0 开始依次存放
-     * 
+     *
      * @param arguments 函数参数列表
-     * @param firstReg 第一个参数的起始寄存器编号（默认为0）
+     * @param firstReg 第一个参数的起始寄存器编号（默认为 0）
      */
     fun setupArgumentRegisters(arguments: List<Argument>, firstReg: Int = 0) {
         for ((index, arg) in arguments.withIndex()) {
             writeRegister(firstReg + index, arg, arg.type)
         }
     }
-    
+
     /**
      * 调试输出当前寄存器状态
      */
@@ -357,7 +449,7 @@ class RegisterToSSAMapper {
 
 /**
  * SSA 构造上下文
- * 
+ *
  * 整合寄存器映射、累加器管理和 IR 构建
  */
 class SSAConstructionContext(
@@ -367,11 +459,11 @@ class SSAConstructionContext(
 ) {
     // 寄存器到 SSA 的映射
     val registerMapper = RegisterToSSAMapper()
-    
+
     // 累加器状态
     private var accumulatorValue: Value? = null
     private var accumulatorType: Type = anyType
-    
+
     /**
      * 获取累加器值
      */
@@ -380,12 +472,12 @@ class SSAConstructionContext(
     }
 
     /**
-     * 尝试获取累加器值，如果未初始化则返回null
+     * 尝试获取累加器值，如果未初始化则返回 null
      */
     fun tryGetAccumulator(): Value? {
         return accumulatorValue
     }
-    
+
     /**
      * 设置累加器值
      */
@@ -393,24 +485,24 @@ class SSAConstructionContext(
         accumulatorValue = value
         accumulatorType = type
     }
-    
+
     /**
      * 检查累加器是否已设置
      */
     fun hasAccumulator(): Boolean = accumulatorValue != null
-    
+
     /**
      * 清除累加器
      */
     fun clearAccumulator() {
         accumulatorValue = null
     }
-    
+
     /**
      * 获取累加器类型
      */
     fun getAccumulatorType(): Type = accumulatorType
-    
+
     /**
      * 从寄存器加载到累加器
      */
@@ -424,7 +516,7 @@ class SSAConstructionContext(
         }
         setAccumulator(value)
     }
-    
+
     /**
      * 从累加器存储到寄存器
      */
@@ -432,7 +524,7 @@ class SSAConstructionContext(
         val acc = getAccumulator()
         registerMapper.writeRegister(registerNum, acc, accumulatorType)
     }
-    
+
     /**
      * 设置当前基本块
      */
@@ -440,7 +532,7 @@ class SSAConstructionContext(
         builder.setInsertPoint(block)
         registerMapper.setCurrentBlock(block)
     }
-    
+
     /**
      * 创建新的基本块并设为当前块
      */
@@ -449,14 +541,14 @@ class SSAConstructionContext(
         setCurrentBlock(block)
         return block
     }
-    
+
     /**
      * 密封基本块
      */
     fun sealBlock(block: BasicBlock) {
         registerMapper.sealBlock(block)
     }
-    
+
     /**
      * 获取当前基本块
      */
@@ -475,23 +567,23 @@ class SSAConstructionContext(
 
 /**
  * 基本块之间的寄存器状态传递
- * 
+ *
  * 用于处理控制流合并时的寄存器值传递
  */
 class RegisterStateTransfer(
     private val mapper: RegisterToSSAMapper
 ) {
-    
+
     /**
      * 记录分支前的寄存器状态
      */
     fun captureBranchState(): Map<Int, Value> {
         return mapper.snapshot()
     }
-    
+
     /**
      * 在控制流合并处创建 PHI 节点
-     * 
+     *
      * @param block 合并目标块
      * @param branchStates 各个分支的寄存器状态
      */
@@ -500,19 +592,19 @@ class RegisterStateTransfer(
         branchStates: List<Pair<BasicBlock, Map<Int, Value>>>
     ) {
         if (branchStates.size < 2) return
-        
+
         // 收集所有分支中定义的所有寄存器
         val allRegisters = branchStates.flatMap { it.second.keys }.toSortedSet()
-        
+
         for (regNum in allRegisters) {
             // 检查所有分支是否都有该寄存器的定义
             val hasInAllBranches = branchStates.all { it.second.containsKey(regNum) }
-            
+
             if (hasInAllBranches) {
                 // 所有分支都有定义，创建 PHI 节点
                 val values = branchStates.map { it.second[regNum]!! }
                 val blocks = branchStates.map { it.first }
-                
+
                 // 检查值是否都相同
                 if (values.distinct().size == 1) {
                     // 所有值相同，不需要 PHI
@@ -521,20 +613,20 @@ class RegisterStateTransfer(
                     // 创建 PHI 节点
                     val phiType = values.first().type
                     val phi = block.createPhi(phiType, "reg_${regNum}_phi")
-                    
+
                     for ((predBlock, value) in blocks.zip(values)) {
                         phi.addIncoming(value, predBlock)
                     }
-                    
+
                     mapper.writeRegister(regNum, phi)
                 }
             }
         }
     }
-    
+
     /**
      * 简化版本的控制流合并
-     * 
+     *
      * 用于 if-else 结构
      */
     fun mergeIfElseState(
@@ -546,11 +638,11 @@ class RegisterStateTransfer(
     ) {
         val branches = mutableListOf<Pair<BasicBlock, Map<Int, Value>>>()
         branches.add(thenBlock to thenState)
-        
+
         if (elseBlock != null && elseState != null) {
             branches.add(elseBlock to elseState)
         }
-        
+
         mergeBranchStates(mergeBlock, branches)
     }
 }

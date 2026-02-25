@@ -721,3 +721,30 @@ class NopInst : Instruction(Opcode.NOP, voidType) {
     override fun getOpcodeString(): String = "nop"
     override fun toString(): String = "nop"
 }
+
+// ==================== SSA构造辅助指令 ====================
+
+/**
+ * 复制指令 - 用于显式表示虚拟寄存器的SSA赋值
+ * 
+ * 在PandaVM到SSA IR的转换中，虚拟寄存器的每次存储（STA）
+ * 对应一个COPY指令，使得寄存器值在IR中有明确定义。
+ */
+class CopyInst(
+    operand: Value,
+    type: Type = operand.type,
+    name: String = ""
+) : Instruction(Opcode.COPY, type, name) {
+    
+    init {
+        addOperand(operand)
+    }
+    
+    val source: Value get() = getOperand(0)
+    
+    override fun isPure(): Boolean = true
+    override fun getOpcodeString(): String = "copy "
+    
+    override fun toString(): String = 
+        "${getNameOrTemporary()} = copy ${source.getNameOrTemporary()}"
+}

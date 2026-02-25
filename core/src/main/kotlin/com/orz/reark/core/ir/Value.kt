@@ -106,7 +106,7 @@ abstract class Value(
     /**
      * 获取值的名称（如果未指定，使用临时名称）
      */
-    fun getNameOrTemporary(): String {
+    open fun getNameOrTemporary(): String {
         return name.ifEmpty { "%$id" }
     }
     
@@ -145,6 +145,11 @@ abstract class Constant(type: Type) : Value(type) {
      * 是否为一值
      */
     open fun isOne(): Boolean = false
+    
+    /**
+     * 常量使用其值的字符串表示，而不是%id格式
+     */
+    override fun getNameOrTemporary(): String = toString()
 }
 
 /**

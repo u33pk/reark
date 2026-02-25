@@ -319,6 +319,11 @@ class IRBuilder(
     fun createNop(): Instruction =
         insert(NopInst())
     
+    // ==================== SSA构造辅助 ====================
+    
+    fun createCopy(value: Value, name: String = ""): Value =
+        insert(CopyInst(value, value.type, name), name)
+    
     // ==================== 常量 ====================
     
     fun getConstantInt(value: Long, type: Type = i64Type): ConstantInt =

@@ -136,8 +136,12 @@ class BytecodeToIRConverter(private val module: Module) {
             val targetBlock = blockMap[inst.offset]
             if (targetBlock != null && targetBlock != currentBlock) {
                 currentBlock = targetBlock
+                // 在切换块之前，确保 builder 的插入点正确设置
+                context.builder.setInsertPoint(currentBlock)
                 context.setCurrentBlock(currentBlock)
             }
+            // 确保每次转换前插入点正确
+            context.builder.setInsertPoint(currentBlock)
 
             // 转换单条指令
             try {
@@ -168,6 +172,10 @@ class BytecodeToIRConverter(private val module: Module) {
         for (block in blocksInOrder) {
             context.registerMapper.sealBlock(block)
         }
+        
+        // 关键修复：在所有块都处理完毕后，完成 PHI 节点的填充
+        // 这确保 PHI 节点正确获取前驱块中最后写入的值
+        context.registerMapper.finalizePhiNodes()
     }
 
     /**
@@ -181,6 +189,16 @@ class BytecodeToIRConverter(private val module: Module) {
         fun findBlockForOffset(offset: Int): BasicBlock? {
             val blockOffset = blockMap.keys.filter { it <= offset }.maxOrNull()
             return blockOffset?.let { blockMap[it] }
+        }
+
+        // 辅助函数：获取指令所在块的结束偏移（下一条指令的起始偏移 - 1）
+        fun getBlockEndOffset(instOffset: Int): Int {
+            val blockOffset = blockMap.keys.filter { it <= instOffset }.maxOrNull()
+                ?: return instOffset
+            // 找到下一个块的起始偏移
+            val nextBlockOffset = blockMap.keys.filter { it > blockOffset }.minOrNull()
+            // 如果没有下一个块，返回当前指令偏移
+            return nextBlockOffset?.let { it - 1 } ?: instOffset + 100
         }
 
         for ((index, inst) in instructions.withIndex()) {
@@ -224,7 +242,16 @@ class BytecodeToIRConverter(private val module: Module) {
                 // 终止指令没有后继
                 // 不做任何操作
             } else {
-                // 普通指令：不需要添加边，因为块内的指令天然属于同一个块
+                // 普通指令：检查是否是块的最后一条指令
+                // 如果是，需要添加 fall-through 边到下一条指令所属的块
+                if (index + 1 < instructions.size) {
+                    val nextInstOffset = instructions[index + 1].offset
+                    val nextBlock = findBlockForOffset(nextInstOffset)
+                    if (nextBlock != null && nextBlock != currentBlock) {
+                        // 下一条指令属于不同的块，添加 fall-through 边
+                        currentBlock.addSuccessor(nextBlock)
+                    }
+                }
             }
         }
     }

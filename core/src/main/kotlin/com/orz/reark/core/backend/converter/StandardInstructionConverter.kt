@@ -27,25 +27,32 @@ object StandardInstructionConverter {
         when (opcode) {
             // ==================== 常量加载 ====================
             PandaAsmOpcodes.StandardOpcode.LDUNDEFINED -> {
-                context.setAccumulator(ConstantSpecial.UNDEFINED)
+                val copyInst = builder.createCopy(ConstantSpecial.UNDEFINED, "acc_undefined")
+                context.setAccumulator(copyInst)
             }
             PandaAsmOpcodes.StandardOpcode.LDNULL -> {
-                context.setAccumulator(ConstantSpecial.NULL)
+                val copyInst = builder.createCopy(ConstantSpecial.NULL, "acc_null")
+                context.setAccumulator(copyInst)
             }
             PandaAsmOpcodes.StandardOpcode.LDTRUE -> {
-                context.setAccumulator(ConstantInt.TRUE)
+                val copyInst = builder.createCopy(ConstantInt.TRUE, "acc_true")
+                context.setAccumulator(copyInst)
             }
             PandaAsmOpcodes.StandardOpcode.LDFALSE -> {
-                context.setAccumulator(ConstantInt.FALSE)
+                val copyInst = builder.createCopy(ConstantInt.FALSE, "acc_false")
+                context.setAccumulator(copyInst)
             }
             PandaAsmOpcodes.StandardOpcode.LDNAN -> {
-                context.setAccumulator(ConstantSpecial.NAN)
+                val copyInst = builder.createCopy(ConstantSpecial.NAN, "acc_nan")
+                context.setAccumulator(copyInst)
             }
             PandaAsmOpcodes.StandardOpcode.LDINFINITY -> {
-                context.setAccumulator(ConstantSpecial.POS_INFINITY)
+                val copyInst = builder.createCopy(ConstantSpecial.POS_INFINITY, "acc_infinity")
+                context.setAccumulator(copyInst)
             }
             PandaAsmOpcodes.StandardOpcode.LDHOLE -> {
-                context.setAccumulator(ConstantSpecial.HOLE)
+                val copyInst = builder.createCopy(ConstantSpecial.HOLE, "acc_hole")
+                context.setAccumulator(copyInst)
             }
             PandaAsmOpcodes.StandardOpcode.LDAI -> {
                 val value = when (val op = inst.operands.getOrNull(0)) {
@@ -53,7 +60,10 @@ object StandardInstructionConverter {
                     is PandaAsmParser.Operand.Immediate32 -> op.value
                     else -> throw IllegalArgumentException("Expected immediate operand for ldai")
                 }
-                context.setAccumulator(ConstantInt.i32(value))
+                // 创建COPY指令包装常量，使得常量在IR中有明确定义
+                val constValue = ConstantInt.i32(value)
+                val copyInst = builder.createCopy(constValue, "acc_const_${value}")
+                context.setAccumulator(copyInst)
             }
             PandaAsmOpcodes.StandardOpcode.FLDAI -> {
                 context.setAccumulator(ConstantFP.ZERO_F64)
@@ -62,19 +72,38 @@ object StandardInstructionConverter {
                 val strId = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.StringId
                     ?: throw IllegalArgumentException("Expected string ID operand")
                 val strValue = module.getOrCreateStringConstant("str_${strId.id}")
-                context.setAccumulator(strValue)
+                val copyInst = builder.createCopy(strValue, "acc_str_${strId.id}")
+                context.setAccumulator(copyInst)
             }
             
             // ==================== 寄存器操作 ====================
             PandaAsmOpcodes.StandardOpcode.LDA -> {
                 val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
                     ?: throw IllegalArgumentException("Expected register operand")
-                context.loadAccumulatorFromRegister(reg.regNum)
+                // 从寄存器读取值，如果是常量则包装成COPY指令
+                val regValue = context.registerMapper.readRegister(reg.regNum)
+                if (regValue != null) {
+                    // 如果寄存器值不是指令（比如是直接从ConstantInt创建的），创建COPY
+                    val accValue = if (regValue is Instruction) {
+                        regValue
+                    } else {
+                        builder.createCopy(regValue, "v${reg.regNum}_to_acc")
+                    }
+                    context.setAccumulator(accValue)
+                } else {
+                    // 寄存器未定义，创建未定义值并包装
+                    val undefValue = UndefValue(anyType)
+                    val copyInst = builder.createCopy(undefValue, "v${reg.regNum}_undef")
+                    context.setAccumulator(copyInst)
+                }
             }
             PandaAsmOpcodes.StandardOpcode.STA -> {
                 val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
                     ?: throw IllegalArgumentException("Expected register operand")
-                context.storeAccumulatorToRegister(reg.regNum)
+                // 创建COPY指令表示寄存器存储，使得寄存器值在IR中有明确定义
+                val accValue = context.getAccumulator()
+                val copyInst = builder.createCopy(accValue, "v${reg.regNum}")
+                context.registerMapper.writeRegister(reg.regNum, copyInst, accValue.type)
             }
             PandaAsmOpcodes.StandardOpcode.MOV_4,
             PandaAsmOpcodes.StandardOpcode.MOV_8,
@@ -120,67 +149,67 @@ object StandardInstructionConverter {
             
             // ==================== 一元运算 ====================
             PandaAsmOpcodes.StandardOpcode.NEG -> {
-                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
-                    ?: throw IllegalArgumentException("Expected register operand for neg")
-                val value = context.registerMapper.readRegister(reg.regNum)
-                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                // neg imm:u8 - 操作数是 IC 槽索引，从累加器读取输入
+                val imm = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Immediate8
+                    ?: throw IllegalArgumentException("Expected immediate operand for neg")
+                val value = context.getAccumulator()
                 context.setAccumulator(builder.createNeg(value))
             }
             PandaAsmOpcodes.StandardOpcode.NOT -> {
-                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
-                    ?: throw IllegalArgumentException("Expected register operand for not")
-                val value = context.registerMapper.readRegister(reg.regNum)
-                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                // not imm:u8 - 操作数是 IC 槽索引，从累加器读取输入
+                val imm = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Immediate8
+                    ?: throw IllegalArgumentException("Expected immediate operand for not")
+                val value = context.getAccumulator()
                 context.setAccumulator(builder.createNot(value))
             }
             PandaAsmOpcodes.StandardOpcode.INC -> {
-                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
-                    ?: throw IllegalArgumentException("Expected register operand for inc")
-                val value = context.registerMapper.readRegister(reg.regNum)
-                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                // inc imm:u8 - 操作数是 IC 槽索引，从累加器读取输入
+                val imm = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Immediate8
+                    ?: throw IllegalArgumentException("Expected immediate operand for inc")
+                val value = context.getAccumulator()
                 context.setAccumulator(builder.createInc(value))
             }
             PandaAsmOpcodes.StandardOpcode.DEC -> {
-                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
-                    ?: throw IllegalArgumentException("Expected register operand for dec")
-                val value = context.registerMapper.readRegister(reg.regNum)
-                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                // dec imm:u8 - 操作数是 IC 槽索引，从累加器读取输入
+                val imm = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Immediate8
+                    ?: throw IllegalArgumentException("Expected immediate operand for dec")
+                val value = context.getAccumulator()
                 context.setAccumulator(builder.createDec(value))
             }
             PandaAsmOpcodes.StandardOpcode.TYPEOF,
             PandaAsmOpcodes.StandardOpcode.TYPEOF_16 -> {
-                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
-                    ?: throw IllegalArgumentException("Expected register operand for typeof")
-                val value = context.registerMapper.readRegister(reg.regNum)
-                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                // typeof imm:u8 - 操作数是 IC 槽索引，从累加器读取输入
+                val imm = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Immediate8
+                    ?: throw IllegalArgumentException("Expected immediate operand for typeof")
+                val value = context.getAccumulator()
                 context.setAccumulator(builder.createTypeOf(value))
             }
             PandaAsmOpcodes.StandardOpcode.TONUMBER -> {
-                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
-                    ?: throw IllegalArgumentException("Expected register operand for tonumber")
-                val value = context.registerMapper.readRegister(reg.regNum)
-                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                // tonumber imm:u8 - 操作数是 IC 槽索引，从累加器读取输入
+                val imm = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Immediate8
+                    ?: throw IllegalArgumentException("Expected immediate operand for tonumber")
+                val value = context.getAccumulator()
                 context.setAccumulator(builder.createToNumber(value))
             }
             PandaAsmOpcodes.StandardOpcode.TONUMERIC -> {
-                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
-                    ?: throw IllegalArgumentException("Expected register operand for tonumeric")
-                val value = context.registerMapper.readRegister(reg.regNum)
-                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                // tonumeric imm:u8 - 操作数是 IC 槽索引，从累加器读取输入
+                val imm = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Immediate8
+                    ?: throw IllegalArgumentException("Expected immediate operand for tonumeric")
+                val value = context.getAccumulator()
                 context.setAccumulator(builder.createToNumeric(value))
             }
             PandaAsmOpcodes.StandardOpcode.ISTRUE -> {
-                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
-                    ?: throw IllegalArgumentException("Expected register operand for istrue")
-                val value = context.registerMapper.readRegister(reg.regNum)
-                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                // istrue imm:u8 - 操作数是 IC 槽索引，从累加器读取输入
+                val imm = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Immediate8
+                    ?: throw IllegalArgumentException("Expected immediate operand for istrue")
+                val value = context.getAccumulator()
                 context.setAccumulator(builder.createIsTrue(value))
             }
             PandaAsmOpcodes.StandardOpcode.ISFALSE -> {
-                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
-                    ?: throw IllegalArgumentException("Expected register operand for isfalse")
-                val value = context.registerMapper.readRegister(reg.regNum)
-                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                // isfalse imm:u8 - 操作数是 IC 槽索引，从累加器读取输入
+                val imm = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Immediate8
+                    ?: throw IllegalArgumentException("Expected immediate operand for isfalse")
+                val value = context.getAccumulator()
                 context.setAccumulator(builder.createIsFalse(value))
             }
             
@@ -563,7 +592,9 @@ object StandardInstructionConverter {
                     i64Type -> builder.getConstantI64(0)
                     else -> builder.getConstantI32(0)
                 }
-                builder.createICmpEQ(acc, zero)
+                // 包装零值为COPY指令，确保在IR中有明确定义
+                val zeroCopy = builder.createCopy(zero, "zero")
+                builder.createICmpEQ(acc, zeroCopy)
             }
             PandaAsmOpcodes.StandardOpcode.JNEZ,
             PandaAsmOpcodes.StandardOpcode.JNEZ_16,
@@ -574,7 +605,9 @@ object StandardInstructionConverter {
                     i64Type -> builder.getConstantI64(0)
                     else -> builder.getConstantI32(0)
                 }
-                builder.createICmpNE(acc, zero)
+                // 包装零值为COPY指令，确保在IR中有明确定义
+                val zeroCopy = builder.createCopy(zero, "zero")
+                builder.createICmpNE(acc, zeroCopy)
             }
             PandaAsmOpcodes.StandardOpcode.JSTRICTEQZ,
             PandaAsmOpcodes.StandardOpcode.JSTRICTEQZ_16 -> {
@@ -584,7 +617,9 @@ object StandardInstructionConverter {
                     i64Type -> builder.getConstantI64(0)
                     else -> builder.getConstantI32(0)
                 }
-                builder.createStrictEq(acc, zero)
+                // 包装零值为COPY指令，确保在IR中有明确定义
+                val zeroCopy = builder.createCopy(zero, "zero")
+                builder.createStrictEq(acc, zeroCopy)
             }
             PandaAsmOpcodes.StandardOpcode.JNSTRICTEQZ,
             PandaAsmOpcodes.StandardOpcode.JNSTRICTEQZ_16 -> {
@@ -594,7 +629,9 @@ object StandardInstructionConverter {
                     i64Type -> builder.getConstantI64(0)
                     else -> builder.getConstantI32(0)
                 }
-                builder.createStrictNe(acc, zero)
+                // 包装零值为COPY指令，确保在IR中有明确定义
+                val zeroCopy = builder.createCopy(zero, "zero")
+                builder.createStrictNe(acc, zeroCopy)
             }
             else -> {
                 // 其他条件跳转，直接使用累加器作为条件
