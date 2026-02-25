@@ -112,38 +112,76 @@ object StandardInstructionConverter {
             PandaAsmOpcodes.StandardOpcode.GREATER,
             PandaAsmOpcodes.StandardOpcode.GREATEREQ,
             PandaAsmOpcodes.StandardOpcode.STRICTEQ,
-            PandaAsmOpcodes.StandardOpcode.STRICTNOTEQ -> {
+            PandaAsmOpcodes.StandardOpcode.STRICTNOTEQ,
+            PandaAsmOpcodes.StandardOpcode.ISIN,
+            PandaAsmOpcodes.StandardOpcode.INSTANCEOF -> {
                 convertComparison(inst, context, opcode)
             }
             
             // ==================== 一元运算 ====================
             PandaAsmOpcodes.StandardOpcode.NEG -> {
-                context.setAccumulator(builder.createNeg(context.getAccumulator()))
+                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
+                    ?: throw IllegalArgumentException("Expected register operand for neg")
+                val value = context.registerMapper.readRegister(reg.regNum)
+                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                context.setAccumulator(builder.createNeg(value))
             }
             PandaAsmOpcodes.StandardOpcode.NOT -> {
-                context.setAccumulator(builder.createNot(context.getAccumulator()))
+                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
+                    ?: throw IllegalArgumentException("Expected register operand for not")
+                val value = context.registerMapper.readRegister(reg.regNum)
+                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                context.setAccumulator(builder.createNot(value))
             }
             PandaAsmOpcodes.StandardOpcode.INC -> {
-                context.setAccumulator(builder.createInc(context.getAccumulator()))
+                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
+                    ?: throw IllegalArgumentException("Expected register operand for inc")
+                val value = context.registerMapper.readRegister(reg.regNum)
+                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                context.setAccumulator(builder.createInc(value))
             }
             PandaAsmOpcodes.StandardOpcode.DEC -> {
-                context.setAccumulator(builder.createDec(context.getAccumulator()))
+                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
+                    ?: throw IllegalArgumentException("Expected register operand for dec")
+                val value = context.registerMapper.readRegister(reg.regNum)
+                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                context.setAccumulator(builder.createDec(value))
             }
             PandaAsmOpcodes.StandardOpcode.TYPEOF,
             PandaAsmOpcodes.StandardOpcode.TYPEOF_16 -> {
-                context.setAccumulator(builder.createTypeOf(context.getAccumulator()))
+                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
+                    ?: throw IllegalArgumentException("Expected register operand for typeof")
+                val value = context.registerMapper.readRegister(reg.regNum)
+                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                context.setAccumulator(builder.createTypeOf(value))
             }
             PandaAsmOpcodes.StandardOpcode.TONUMBER -> {
-                context.setAccumulator(builder.createToNumber(context.getAccumulator()))
+                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
+                    ?: throw IllegalArgumentException("Expected register operand for tonumber")
+                val value = context.registerMapper.readRegister(reg.regNum)
+                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                context.setAccumulator(builder.createToNumber(value))
             }
             PandaAsmOpcodes.StandardOpcode.TONUMERIC -> {
-                context.setAccumulator(builder.createToNumeric(context.getAccumulator()))
+                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
+                    ?: throw IllegalArgumentException("Expected register operand for tonumeric")
+                val value = context.registerMapper.readRegister(reg.regNum)
+                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                context.setAccumulator(builder.createToNumeric(value))
             }
             PandaAsmOpcodes.StandardOpcode.ISTRUE -> {
-                context.setAccumulator(builder.createIsTrue(context.getAccumulator()))
+                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
+                    ?: throw IllegalArgumentException("Expected register operand for istrue")
+                val value = context.registerMapper.readRegister(reg.regNum)
+                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                context.setAccumulator(builder.createIsTrue(value))
             }
             PandaAsmOpcodes.StandardOpcode.ISFALSE -> {
-                context.setAccumulator(builder.createIsFalse(context.getAccumulator()))
+                val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
+                    ?: throw IllegalArgumentException("Expected register operand for isfalse")
+                val value = context.registerMapper.readRegister(reg.regNum)
+                    ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+                context.setAccumulator(builder.createIsFalse(value))
             }
             
             // ==================== 对象创建 ====================
@@ -232,7 +270,19 @@ object StandardInstructionConverter {
             PandaAsmOpcodes.StandardOpcode.JEQZ,
             PandaAsmOpcodes.StandardOpcode.JEQZ_16,
             PandaAsmOpcodes.StandardOpcode.JEQZ_32 -> {
-                convertConditionalBranch(inst, context)
+            convertConditionalBranch(inst, context)
+            }
+            
+            // 带寄存器的条件跳转
+            PandaAsmOpcodes.StandardOpcode.JEQ,
+            PandaAsmOpcodes.StandardOpcode.JEQ_16,
+            PandaAsmOpcodes.StandardOpcode.JNE,
+            PandaAsmOpcodes.StandardOpcode.JNE_16,
+            PandaAsmOpcodes.StandardOpcode.JSTRICTEQ,
+            PandaAsmOpcodes.StandardOpcode.JSTRICTEQ_16,
+            PandaAsmOpcodes.StandardOpcode.JNSTRICTEQ,
+            PandaAsmOpcodes.StandardOpcode.JNSTRICTEQ_16 -> {
+                convertRegisterConditionalBranch(inst, context, opcode)
             }
             
             // ==================== 其他 ====================
@@ -323,6 +373,8 @@ object StandardInstructionConverter {
             PandaAsmOpcodes.StandardOpcode.GREATEREQ -> builder.createICmpSGE(leftValue, rightValue)
             PandaAsmOpcodes.StandardOpcode.STRICTEQ -> builder.createStrictEq(leftValue, rightValue)
             PandaAsmOpcodes.StandardOpcode.STRICTNOTEQ -> builder.createStrictNe(leftValue, rightValue)
+            PandaAsmOpcodes.StandardOpcode.ISIN -> builder.createIsIn(rightValue, leftValue)
+            PandaAsmOpcodes.StandardOpcode.INSTANCEOF -> builder.createInstanceOf(leftValue, rightValue)
             else -> throw IllegalStateException("Unexpected opcode: $opcode")
         }
         context.setAccumulator(result)
@@ -482,21 +534,130 @@ object StandardInstructionConverter {
     }
     
     private fun convertConditionalBranch(inst: PandaAsmParser.ParsedInstruction, context: SSAConstructionContext) {
-        val cond = context.getAccumulator()
-        
+        val builder = context.builder
+        val acc = context.getAccumulator()
+
         // 计算跳转目标（PandaASM 的偏移量是相对于指令起始位置的）
         val jumpOffset = (inst.operands.firstOrNull() as? PandaAsmParser.Operand.JumpOffset)?.offset ?: 0
         val jumpTarget = inst.offset + jumpOffset
-        
+
         // 获取预创建的目标块和 fall-through 块
-        // 注意：JEQZ 是"等于零跳转"，所以跳转目标是条件为假 (cond==0) 时的目标
-        val falseBlock = context.getBlockByOffset(jumpTarget)
-            ?: context.getCurrentFunction()?.createBlock("jmp_false_$jumpTarget")
-        // fall-through 块是下一条指令的块（条件为真时的目标）
+        val targetBlock = context.getBlockByOffset(jumpTarget)
+            ?: context.getCurrentFunction()?.createBlock("jmp_target_$jumpTarget")
+        // fall-through 块是下一条指令的块
         val instLength = ControlFlowAnalyzer.calculateInstructionLength(inst)
         val fallThroughOffset = inst.offset + instLength
-        val trueBlock = context.getBlockByOffset(fallThroughOffset)
-            ?: context.getCurrentFunction()?.createBlock("jmp_true_${inst.offset}")
+        val fallThroughBlock = context.getBlockByOffset(fallThroughOffset)
+            ?: context.getCurrentFunction()?.createBlock("jmp_fallthrough_${inst.offset}")
+
+        // 根据 JEQZ 的语义创建条件分支
+        // JEQZ: Jump if Equal to Zero - 如果累加器等于 0 则跳转
+        // 需要创建条件：acc == 0
+        val cond = when (val opcode = PandaAsmOpcodes.StandardOpcode.fromByte(inst.opcode)) {
+            PandaAsmOpcodes.StandardOpcode.JEQZ,
+            PandaAsmOpcodes.StandardOpcode.JEQZ_16,
+            PandaAsmOpcodes.StandardOpcode.JEQZ_32 -> {
+                // acc == 0 时跳转
+                val zero = when (acc.type) {
+                    i32Type -> builder.getConstantI32(0)
+                    i64Type -> builder.getConstantI64(0)
+                    else -> builder.getConstantI32(0)
+                }
+                builder.createICmpEQ(acc, zero)
+            }
+            PandaAsmOpcodes.StandardOpcode.JNEZ,
+            PandaAsmOpcodes.StandardOpcode.JNEZ_16,
+            PandaAsmOpcodes.StandardOpcode.JNEZ_32 -> {
+                // acc != 0 时跳转
+                val zero = when (acc.type) {
+                    i32Type -> builder.getConstantI32(0)
+                    i64Type -> builder.getConstantI64(0)
+                    else -> builder.getConstantI32(0)
+                }
+                builder.createICmpNE(acc, zero)
+            }
+            PandaAsmOpcodes.StandardOpcode.JSTRICTEQZ,
+            PandaAsmOpcodes.StandardOpcode.JSTRICTEQZ_16 -> {
+                // acc === 0 时跳转
+                val zero = when (acc.type) {
+                    i32Type -> builder.getConstantI32(0)
+                    i64Type -> builder.getConstantI64(0)
+                    else -> builder.getConstantI32(0)
+                }
+                builder.createStrictEq(acc, zero)
+            }
+            PandaAsmOpcodes.StandardOpcode.JNSTRICTEQZ,
+            PandaAsmOpcodes.StandardOpcode.JNSTRICTEQZ_16 -> {
+                // acc !== 0 时跳转
+                val zero = when (acc.type) {
+                    i32Type -> builder.getConstantI32(0)
+                    i64Type -> builder.getConstantI64(0)
+                    else -> builder.getConstantI32(0)
+                }
+                builder.createStrictNe(acc, zero)
+            }
+            else -> {
+                // 其他条件跳转，直接使用累加器作为条件
+                acc
+            }
+        }
+
+        if (targetBlock != null && fallThroughBlock != null) {
+            // createCondBr 的语义：条件为真跳转到第一个目标，否则跳转到第二个目标
+            builder.createCondBr(cond, targetBlock, fallThroughBlock)
+        }
+    }
+    
+    /**
+     * 转换带寄存器的条件跳转指令 (JEQ, JNE, JSTRICTEQ, JNSTRICTEQ 等)
+     * 这些指令比较累加器和寄存器，然后根据结果跳转
+     */
+    private fun convertRegisterConditionalBranch(
+        inst: PandaAsmParser.ParsedInstruction,
+        context: SSAConstructionContext,
+        opcode: PandaAsmOpcodes.StandardOpcode
+    ) {
+        val builder = context.builder
+        
+        // 获取寄存器操作数（第一个操作数是寄存器）
+        val reg = inst.operands.getOrNull(0) as? PandaAsmParser.Operand.Register8
+            ?: throw IllegalArgumentException("Expected register operand for $opcode")
+        
+        // 获取跳转偏移（第二个操作数）
+        val jumpOffset = (inst.operands.getOrNull(1) as? PandaAsmParser.Operand.JumpOffset)?.offset ?: 0
+        
+        // 读取寄存器值
+        val regValue = context.registerMapper.readRegister(reg.regNum)
+            ?: throw IllegalStateException("Register v${reg.regNum} not defined")
+        
+        // 获取累加器值
+        val accValue = context.getAccumulator()
+        
+        // 执行比较
+        val cond = when (opcode) {
+            PandaAsmOpcodes.StandardOpcode.JEQ,
+            PandaAsmOpcodes.StandardOpcode.JEQ_16 -> builder.createICmpEQ(accValue, regValue)
+            PandaAsmOpcodes.StandardOpcode.JNE,
+            PandaAsmOpcodes.StandardOpcode.JNE_16 -> builder.createICmpNE(accValue, regValue)
+            PandaAsmOpcodes.StandardOpcode.JSTRICTEQ,
+            PandaAsmOpcodes.StandardOpcode.JSTRICTEQ_16 -> builder.createStrictEq(accValue, regValue)
+            PandaAsmOpcodes.StandardOpcode.JNSTRICTEQ,
+            PandaAsmOpcodes.StandardOpcode.JNSTRICTEQ_16 -> builder.createStrictNe(accValue, regValue)
+            else -> throw IllegalStateException("Unexpected opcode: $opcode")
+        }
+        
+        // 计算跳转目标
+        val jumpTarget = inst.offset + jumpOffset
+        
+        // 获取目标块和 fall-through 块
+        // JEQ 等指令：如果比较相等（cond为真）则跳转
+        val trueBlock = context.getBlockByOffset(jumpTarget)
+            ?: context.getCurrentFunction()?.createBlock("jmp_true_$jumpTarget")
+        
+        val instLength = ControlFlowAnalyzer.calculateInstructionLength(inst)
+        val fallThroughOffset = inst.offset + instLength
+        val falseBlock = context.getBlockByOffset(fallThroughOffset)
+            ?: context.getCurrentFunction()?.createBlock("jmp_false_${inst.offset}")
         
         if (trueBlock != null && falseBlock != null) {
             context.builder.createCondBr(cond, trueBlock, falseBlock)

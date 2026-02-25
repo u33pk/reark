@@ -77,6 +77,8 @@ class SimplifyCFG : FunctionPass {
     
     /**
      * 合并基本块
+     *
+     * 只合并单前驱的情况，多前驱情况由专门的 pass 处理。
      */
     private fun mergeBlocks(function: SSAFunction): Boolean {
         var modified = false
@@ -87,11 +89,16 @@ class SimplifyCFG : FunctionPass {
             if (succs.size != 1) continue
 
             val succ = succs[0]
-            // 检查后继是否只有一个前驱且不是入口块
-            if (succ.predecessorCount() != 1 || succ == function.entryBlock) continue
+            
+            // 检查后继是否是入口块
+            if (succ == function.entryBlock) continue
 
             // 额外检查：确保 succ 仍然属于函数
             if (succ.parent != function) continue
+
+            // 只处理单前驱情况
+            // 多前驱情况需要更新分支指令的操作数，比较复杂
+            if (succ.predecessorCount() != 1) continue
 
             // 可以合并
             // 1. 移除当前块的终止指令（br 等）
@@ -115,7 +122,7 @@ class SimplifyCFG : FunctionPass {
                 block.addSuccessor(next)
             }
 
-            // 4. 移除后继（此时 succ 应该没有前驱了）
+            // 4. 移除后继
             function.removeBlock(succ)
 
             modified = true

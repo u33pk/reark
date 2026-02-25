@@ -168,7 +168,7 @@ class PandaAsmParser(private val bytecode: ByteArray) {
     private fun parseStandardOperands(opcode: Int): List<Operand> {
         return when (opcode) {
             // 无操作数
-            0x00, 0x01, 0x02, 0x03, 0x04, 0x23, 0x24, 0x64, 0x65, 0x66, 0x69, 0x6A, 0x6B,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x64, 0x65, 0x66, 0x69, 0x6A, 0x6B,
             0x6C, 0x6D, 0x6E, 0x6F, 0x70, 0xBF, 0xC0, 0xD5 -> emptyList()
 
             // 8 位立即数 (单操作数)
@@ -194,15 +194,35 @@ class PandaAsmParser(private val bytecode: ByteArray) {
             // 16 位字符串 ID
             0x3E -> listOf(Operand.StringId(readUnsignedShort()))
 
-            // 8 位跳转偏移（条件跳转）- 必须在 8 位立即数之后处理
-            in 0x4F..0x5F -> listOf(Operand.JumpOffset(readSignedByte()))
+            // 8 位跳转偏移（条件跳转）- 0x4F(JEQZ), 0x51(JNEZ), 0x52(JSTRICTEQZ), 0x53(JNSTRICTEQZ)
+            // 0x54(JEQNULL), 0x55(JNENULL), 0x56(JSTRICTEQNULL), 0x57(JNSTRICTEQNULL)
+            // 0x58(JEQUNDEFINED), 0x59(JNEUNDEFINED), 0x5A(JSTRICTEQUNDEFINED), 0x5B(JNSTRICTEQUNDEFINED)
+            0x4F, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B -> 
+                listOf(Operand.JumpOffset(readSignedByte()))
 
-            // 16 位跳转偏移（条件跳转）
-            0x9B, 0x9C, 0x9D, 0x9E, 0x9F, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7,
-            0xA8, 0xA9, 0xAA -> listOf(Operand.JumpOffset(readSignedShort()))
+            // 16 位跳转偏移（条件跳转）- 只有纯跳转偏移，没有寄存器
+            // 0x50(JEQZ_16), 0x9B(JNEZ_16), 0x9C(JNEZ_32?), 0x9D(JSTRICTEQZ_16), 0x9E(JNSTRICTEQZ_16)
+            // 0x9F(JEQNULL_16), 0xA0(JNENULL_16), 0xA1(JSTRICTEQNULL_16), 0xA2(JNSTRICTEQNULL_16)
+            // 0xA3(JEQUNDEFINED_16), 0xA4(JNEUNDEFINED_16), 0xA5(JSTRICTEQUNDEFINED_16), 0xA6(JNSTRICTEQUNDEFINED_16)
+            0x50, 0x9B, 0x9C, 0x9D, 0x9E, 0x9F, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6 -> 
+                listOf(Operand.JumpOffset(readSignedShort()))
 
-            // 8 位寄存器
-            0x08, 0x36, 0x5C, 0x5D, 0x5E, 0x5F -> listOf(Operand.Register8(readUnsignedByte()))
+            // 8 位寄存器 + 8 位跳转偏移 (JEQ=0x5C, JNE=0x5D, JSTRICTEQ=0x5E, JNSTRICTEQ=0x5F)
+            0x5C, 0x5D, 0x5E, 0x5F -> {
+                val reg = readUnsignedByte()
+                val offset = readSignedByte()
+                listOf(Operand.Register8(reg), Operand.JumpOffset(offset))
+            }
+
+            // 8 位寄存器 + 16 位跳转偏移 (JEQ_16=0xA7, JNE_16=0xA8, JSTRICTEQ_16=0xA9, JNSTRICTEQ_16=0xAA)
+            0xA7, 0xA8, 0xA9, 0xAA -> {
+                val reg = readUnsignedByte()
+                val offset = readSignedShort()
+                listOf(Operand.Register8(reg), Operand.JumpOffset(offset))
+            }
+
+            // 8 位寄存器 (单个)
+            0x08, 0x36 -> listOf(Operand.Register8(readUnsignedByte()))
 
             // 8 位立即数 + 8 位寄存器 (二元运算和比较指令)
             // add2(0x0A), sub2(0x0B), mul2(0x0C), div2(0x0D), mod2(0x0E)
@@ -210,12 +230,16 @@ class PandaAsmParser(private val bytecode: ByteArray) {
             // shl2(0x15), shr2(0x16), ashr2(0x17), and2(0x18), or2(0x19), xor2(0x1A), exp(0x1B)
             // isin(0x25), instanceof(0x26), strictnoteq(0x27), stricteq(0x28)
             0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16,
-            0x17, 0x18, 0x19, 0x1A, 0x1B,
-            0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28 -> {
+            0x17, 0x18, 0x19, 0x1A, 0x1B, 0x25, 0x26, 0x27, 0x28 -> {
                 val imm = readUnsignedByte()
                 val reg = readUnsignedByte()
                 listOf(Operand.Immediate8(imm), Operand.Register8(reg))
             }
+
+            // 8 位寄存器 (一元运算指令)
+            // not(0x20), inc(0x21), dec(0x22), istrue(0x23), isfalse(0x24)
+            // typeof(0x1C), tonumber(0x1D), tonumeric(0x1E)
+            0x1C, 0x1D, 0x1E, 0x20, 0x21, 0x22, 0x23, 0x24 -> listOf(Operand.Register8(readUnsignedByte()))
 
             // 32 位立即数 (ldai)
             0x62 -> listOf(Operand.Immediate32(readInt()))

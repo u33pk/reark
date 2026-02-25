@@ -26,11 +26,19 @@ class BytecodeToIRConverter(private val module: Module) {
     
     /**
      * 将字节码转换为 IR 函数
+     * 
+     * @param functionName 函数名称
+     * @param bytecode 字节码
+     * @param paramCount 实际函数参数数量（不包括隐式参数 FunctionObject, NewTarget, this）
+     * @param numVRegs 虚拟寄存器总数（用于计算参数寄存器位置）
+     * @param numArgs 总参数数量（包括隐式参数，用于计算参数寄存器位置）
      */
     fun convert(
         functionName: String,
         bytecode: ByteArray,
-        paramCount: Int = 0
+        paramCount: Int = 0,
+        numVRegs: Int = 0,
+        numArgs: Int = 0
     ): ConversionResult {
         val warnings = mutableListOf<String>()
         val errors = mutableListOf<String>()
@@ -61,7 +69,7 @@ class BytecodeToIRConverter(private val module: Module) {
         }
         
         // 执行转换
-        performConversion(function, instructions, paramCount, warnings, errors)
+        performConversion(function, instructions, paramCount, numVRegs, numArgs, warnings, errors)
         
         // 验证函数
         if (!function.verify()) {
@@ -78,6 +86,8 @@ class BytecodeToIRConverter(private val module: Module) {
         function: SSAFunction,
         instructions: List<PandaAsmParser.ParsedInstruction>,
         paramCount: Int,
+        numVRegs: Int,
+        numArgs: Int,
         warnings: MutableList<String>,
         errors: MutableList<String>
     ) {
@@ -101,7 +111,18 @@ class BytecodeToIRConverter(private val module: Module) {
         val context = SSAConstructionContext(builder, module, blockMap)
 
         // 设置参数寄存器映射
-        if (paramCount > 0) {
+        // PandaVM 调用约定：
+        // - numVRegs 是局部变量寄存器数量 (v0 到 v{numVRegs-1})
+        // - 参数从 numVRegs + numArgs - paramCount 开始存放
+        // - numArgs 包括3个隐式参数 (FunctionObject, NewTarget, this) + 实际参数
+        if (paramCount > 0 && numVRegs > 0) {
+            // 第一个实际参数的寄存器编号 = numVRegs + numArgs - paramCount
+            // 例如：numVRegs=4, numArgs=5, paramCount=2
+            // firstArgReg = 4 + 5 - 2 = 7 (即 v7, v8)
+            val firstArgReg = numVRegs + numArgs - paramCount
+            context.registerMapper.setupArgumentRegisters(function.arguments(), firstArgReg)
+        } else if (paramCount > 0) {
+            // 如果没有 numVRegs 信息，使用默认方式（从0开始）
             context.registerMapper.setupArgumentRegisters(function.arguments())
         }
 

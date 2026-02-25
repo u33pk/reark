@@ -93,6 +93,9 @@ class RegisterToSSAMapper {
         return null
     }
     
+    // 用于检测循环的线程局部变量
+    private val visitingBlocks = ThreadLocal.withInitial { mutableSetOf<BasicBlock>() }
+
     /**
      * 在指定基本块中读取寄存器值
      *
@@ -108,58 +111,73 @@ class RegisterToSSAMapper {
             return blockState.registerStates[registerNum]
         }
 
-        // 2. 如果块未封闭且不是入口块，可能需要生成 PHI
-        val predecessors = block.predecessors()
+        // 检测循环依赖，避免无限递归
+        val visiting = visitingBlocks.get()
+        if (block in visiting) {
+            // 检测到循环，返回 null
+            return null
+        }
 
-        return when {
-            // 没有前驱（入口块）
-            predecessors.isEmpty() -> {
-                // 尝试从全局寄存器状态获取
-                registerStates[registerNum]?.currentValue
-            }
+        // 标记为正在访问
+        visiting.add(block)
 
-            // 只有一个前驱，直接递归获取
-            predecessors.size == 1 -> {
-                val predBlock = predecessors[0]
-                val predValue = readRegisterInBlock(registerNum, predBlock)
-                predValue?.let {
-                    // 缓存到当前块
-                    getOrCreateBlockState(block).registerStates[registerNum] = it
-                }
-                predValue
-            }
+        try {
+            // 2. 如果块未封闭且不是入口块，可能需要生成 PHI
+            val predecessors = block.predecessors()
 
-            // 多个前驱，需要 PHI 节点
-            else -> {
-                // 检查是否所有前驱都能提供该寄存器的值
-                val allPredsHaveValue = predecessors.all { pred ->
-                    readRegisterInBlock(registerNum, pred) != null
+            return when {
+                // 没有前驱（入口块）
+                predecessors.isEmpty() -> {
+                    // 尝试从全局寄存器状态获取
+                    registerStates[registerNum]?.currentValue
                 }
 
-                if (allPredsHaveValue) {
-                    // 创建 PHI 节点（如果尚未创建）
-                    val phi = incompletePhis[block]?.get(registerNum)
-                        ?: createPhiForRegister(registerNum, block)
+                // 只有一个前驱，直接递归获取
+                predecessors.size == 1 -> {
+                    val predBlock = predecessors[0]
+                    val predValue = readRegisterInBlock(registerNum, predBlock)
+                    predValue?.let {
+                        // 缓存到当前块
+                        getOrCreateBlockState(block).registerStates[registerNum] = it
+                    }
+                    predValue
+                }
 
-                    // 如果块已封闭，填充 PHI 的 incoming
-                    if (blockState?.isSealed == true) {
-                        fillPhiIncoming(phi, registerNum, block)
+                // 多个前驱，需要 PHI 节点
+                else -> {
+                    // 检查是否所有前驱都能提供该寄存器的值
+                    val allPredsHaveValue = predecessors.all { pred ->
+                        readRegisterInBlock(registerNum, pred) != null
                     }
 
-                    phi
-                } else {
-                    // 如果不是所有前驱都有该寄存器的定义，可能是因为某些分支没有执行到
-                    // 尝试从已经定义的地方获取值，或返回 null
-                    for (pred in predecessors) {
-                        val predValue = readRegisterInBlock(registerNum, pred)
-                        if (predValue != null) {
-                            return predValue
+                    if (allPredsHaveValue) {
+                        // 创建 PHI 节点（如果尚未创建）
+                        val phi = incompletePhis[block]?.get(registerNum)
+                            ?: createPhiForRegister(registerNum, block)
+
+                        // 如果块已封闭，填充 PHI 的 incoming
+                        if (blockState?.isSealed == true) {
+                            fillPhiIncoming(phi, registerNum, block)
                         }
+
+                        phi
+                    } else {
+                        // 如果不是所有前驱都有该寄存器的定义，可能是因为某些分支没有执行到
+                        // 尝试从已经定义的地方获取值，或返回 null
+                        for (pred in predecessors) {
+                            val predValue = readRegisterInBlock(registerNum, pred)
+                            if (predValue != null) {
+                                return predValue
+                            }
+                        }
+                        // 如果都没有找到，返回 null
+                        null
                     }
-                    // 如果都没有找到，返回 null
-                    null
                 }
             }
+        } finally {
+            // 完成访问，移除标记
+            visiting.remove(block)
         }
     }
     
@@ -168,21 +186,27 @@ class RegisterToSSAMapper {
      */
     private fun createPhiForRegister(registerNum: Int, block: BasicBlock): PhiInst {
         // 确定 PHI 类型
-        val phiType = registerStates[registerNum]?.currentType 
-            ?: block.predecessors().firstOrNull()?.let { 
-                readRegisterInBlock(registerNum, it)?.type 
-            } 
+        val phiType = registerStates[registerNum]?.currentType
+            ?: block.predecessors().firstOrNull()?.let { pred ->
+                // 使用非递归方式获取类型，避免循环依赖
+                val predState = blockStates[pred]
+                if (predState != null && predState.registerStates.containsKey(registerNum)) {
+                    predState.registerStates[registerNum]?.type
+                } else {
+                    registerStates[registerNum]?.currentType
+                }
+            }
             ?: anyType
-        
+
         // 创建 PHI 节点
         val phi = block.createPhi(phiType, "reg_${registerNum}_phi")
-        
+
         // 缓存 PHI 节点
         incompletePhis.getOrPut(block) { mutableMapOf() }[registerNum] = phi
-        
+
         // 更新块状态
         getOrCreateBlockState(block).registerStates[registerNum] = phi
-        
+
         return phi
     }
     
@@ -308,10 +332,13 @@ class RegisterToSSAMapper {
      * 
      * 将函数参数映射到寄存器编号
      * PandaASM 约定：参数从寄存器 0 开始依次存放
+     * 
+     * @param arguments 函数参数列表
+     * @param firstReg 第一个参数的起始寄存器编号（默认为0）
      */
-    fun setupArgumentRegisters(arguments: List<Argument>) {
+    fun setupArgumentRegisters(arguments: List<Argument>, firstReg: Int = 0) {
         for ((index, arg) in arguments.withIndex()) {
-            writeRegister(index, arg, arg.type)
+            writeRegister(firstReg + index, arg, arg.type)
         }
     }
     
