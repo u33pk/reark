@@ -39,25 +39,134 @@ class BranchInst(
 }
 
 /**
- * 条件分支
+ * 条件分支（通用）
  */
 class CondBranchInst(
     condition: Value,
     val trueTarget: BasicBlock,
     val falseTarget: BasicBlock
 ) : Instruction(Opcode.BR_COND, voidType) {
-    
+
     init {
         addOperand(condition)
     }
-    
+
     val condition: Value get() = getOperand(0)
-    
+
     override fun isTerminator(): Boolean = true
     override fun getOpcodeString(): String = "br "
-    
-    override fun toString(): String = 
+
+    override fun toString(): String =
         "br ${condition.getNameOrTemporary()}, ${trueTarget.getNameOrTemporary()}, ${falseTarget.getNameOrTemporary()}"
+}
+
+// ==================== 条件分支指令（带比较操作） ====================
+
+/**
+ * 条件分支基类 - 带比较操作的条件分支
+ */
+abstract class CondBranchCmpInst(
+    opcode: Opcode,
+    left: Value,
+    right: Value,
+    val trueTarget: BasicBlock,
+    val falseTarget: BasicBlock
+) : Instruction(opcode, voidType) {
+
+    init {
+        addOperand(left)
+        addOperand(right)
+    }
+
+    val left: Value get() = getOperand(0)
+    val right: Value get() = getOperand(1)
+
+    override fun isTerminator(): Boolean = true
+    override fun getOpcodeString(): String = opcode.name.lowercase().replace("br_", "br_")
+}
+
+/**
+ * 小于则跳转 (Branch if Less Than)
+ */
+class BranchLtInst(
+    left: Value,
+    right: Value,
+    trueTarget: BasicBlock,
+    falseTarget: BasicBlock
+) : CondBranchCmpInst(Opcode.BR_LT, left, right, trueTarget, falseTarget) {
+
+    override fun toString(): String =
+        "br_lt ${left.getNameOrTemporary()}, ${right.getNameOrTemporary()}, ${trueTarget.getNameOrTemporary()}, ${falseTarget.getNameOrTemporary()}"
+}
+
+/**
+ * 小于等于则跳转 (Branch if Less or Equal)
+ */
+class BranchLeInst(
+    left: Value,
+    right: Value,
+    trueTarget: BasicBlock,
+    falseTarget: BasicBlock
+) : CondBranchCmpInst(Opcode.BR_LE, left, right, trueTarget, falseTarget) {
+
+    override fun toString(): String =
+        "br_le ${left.getNameOrTemporary()}, ${right.getNameOrTemporary()}, ${trueTarget.getNameOrTemporary()}, ${falseTarget.getNameOrTemporary()}"
+}
+
+/**
+ * 大于则跳转 (Branch if Greater Than)
+ */
+class BranchGtInst(
+    left: Value,
+    right: Value,
+    trueTarget: BasicBlock,
+    falseTarget: BasicBlock
+) : CondBranchCmpInst(Opcode.BR_GT, left, right, trueTarget, falseTarget) {
+
+    override fun toString(): String =
+        "br_gt ${left.getNameOrTemporary()}, ${right.getNameOrTemporary()}, ${trueTarget.getNameOrTemporary()}, ${falseTarget.getNameOrTemporary()}"
+}
+
+/**
+ * 大于等于则跳转 (Branch if Greater or Equal)
+ */
+class BranchGeInst(
+    left: Value,
+    right: Value,
+    trueTarget: BasicBlock,
+    falseTarget: BasicBlock
+) : CondBranchCmpInst(Opcode.BR_GE, left, right, trueTarget, falseTarget) {
+
+    override fun toString(): String =
+        "br_ge ${left.getNameOrTemporary()}, ${right.getNameOrTemporary()}, ${trueTarget.getNameOrTemporary()}, ${falseTarget.getNameOrTemporary()}"
+}
+
+/**
+ * 等于则跳转 (Branch if Equal)
+ */
+class BranchEqInst(
+    left: Value,
+    right: Value,
+    trueTarget: BasicBlock,
+    falseTarget: BasicBlock
+) : CondBranchCmpInst(Opcode.BR_EQ, left, right, trueTarget, falseTarget) {
+
+    override fun toString(): String =
+        "br_eq ${left.getNameOrTemporary()}, ${right.getNameOrTemporary()}, ${trueTarget.getNameOrTemporary()}, ${falseTarget.getNameOrTemporary()}"
+}
+
+/**
+ * 不等于则跳转 (Branch if Not Equal)
+ */
+class BranchNeInst(
+    left: Value,
+    right: Value,
+    trueTarget: BasicBlock,
+    falseTarget: BasicBlock
+) : CondBranchCmpInst(Opcode.BR_NE, left, right, trueTarget, falseTarget) {
+
+    override fun toString(): String =
+        "br_ne ${left.getNameOrTemporary()}, ${right.getNameOrTemporary()}, ${trueTarget.getNameOrTemporary()}, ${falseTarget.getNameOrTemporary()}"
 }
 
 /**

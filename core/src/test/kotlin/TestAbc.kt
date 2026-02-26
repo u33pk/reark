@@ -3,10 +3,18 @@ import com.orz.reark.core.ir.Module
 import com.orz.reark.core.pass.PassManager
 import com.orz.reark.core.pass.transform.AggressiveDeadCodeElimination
 import com.orz.reark.core.pass.transform.AlgebraicSimplification
+import com.orz.reark.core.pass.transform.BranchFolding
+import com.orz.reark.core.pass.transform.CompoundAssignment
+import com.orz.reark.core.pass.transform.ConstantCoalescing
 import com.orz.reark.core.pass.transform.ConstantFolding
 import com.orz.reark.core.pass.transform.ConstantPropagation
+import com.orz.reark.core.pass.transform.GlobalValueNumbering
+import com.orz.reark.core.pass.transform.LoopInvariantCodeMotion
+import com.orz.reark.core.pass.transform.RedundantCopyElimination
 import com.orz.reark.core.pass.transform.RedundantReturnElimination
 import com.orz.reark.core.pass.transform.SimplifyCFG
+import com.orz.reark.core.pass.transform.TypePropagation
+import com.orz.reark.core.pass.transform.VariableReconstruction
 import me.yricky.oh.abcd.AbcBuf
 import me.yricky.oh.abcd.cfm.AbcClass
 import me.yricky.oh.common.toByteArray
@@ -48,26 +56,36 @@ object TestAbc {
     private fun printFunctionIR(title: String, function: com.orz.reark.core.ir.Function) {
         println("\n$title")
         println("-".repeat(60))
-        println(function)
+        function.blocks().forEach { block ->
+            println("${block.getNameOrTemporary()}:")
+            block.instructions().forEach { inst ->
+                println("  $inst")
+            }
+        }
     }
 
     @JvmStatic
     fun main(args: Array<String>){
-        val file = File("/home/orz/data/unitTest/test.abc")
+        val file = File("/home/orz/project/unitTest/test.abc")
         val mmap = FileChannel.open(file.toPath()).map(FileChannel.MapMode.READ_ONLY,0,file.length())
         val abc = AbcBuf("", wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+        println("DEBUG-")
         abc.classes.forEach { off, item ->
             if(item is AbcClass){
                 item.methods.forEach { method ->
                     println("[M] ${method.name}")
-                    val codeItem = method.codeItem
-                    val result = codeItem?.instructions?.toByteArray()
+                    if(method.name == "func_main_0"){
 
-                    if (result != null) {
-                        val numArgs = codeItem.numArgs
-                        val numVRegs = codeItem.numVRegs
-                        val actualParamCount = (numArgs - 3).coerceAtLeast(0)
-                        fullOptimizationPipeline(result, actualParamCount, numVRegs, codeItem.numArgs)
+                    }else{
+                        val codeItem = method.codeItem
+                        val result = codeItem?.instructions?.toByteArray()
+
+                        if (result != null) {
+                            val numArgs = codeItem.numArgs
+                            val numVRegs = codeItem.numVRegs
+                            val actualParamCount = (numArgs - 3).coerceAtLeast(0)
+                            fullOptimizationPipeline(result, actualParamCount, numVRegs, codeItem.numArgs)
+                        }
                     }
                 }
             }
@@ -92,8 +110,17 @@ object TestAbc {
             RedundantReturnElimination(),
             ConstantFolding(),
             ConstantPropagation(),
+            RedundantCopyElimination(),
+            ConstantCoalescing(),
+            BranchFolding(),
+            LoopInvariantCodeMotion(),
+            GlobalValueNumbering(),      // GVN：复用相同的全局属性查找
+            TypePropagation(),           // 类型传播：消除冗余的 TO_NUMERIC
+            VariableReconstruction(),    // 变量重建：还原有意义的变量名
+            CompoundAssignment(),        // 复合赋值：i = ADD 2, i => i += 2
             AlgebraicSimplification(),
-            SimplifyCFG()
+            SimplifyCFG(),
+            AggressiveDeadCodeElimination()  // 第二次 ADCE，清理未使用的赋值
         )
 
         var currentInstCount = beforeInstCount

@@ -22,6 +22,20 @@ class Module(
     private val stringConstants = mutableMapOf<String, ConstantString>()
     
     /**
+     * 字符串 ID 到字符串值的映射（用于反编译时恢复原始字符串）
+     * key: 字符串 ID (如 "str_0", "str_1" 等)
+     * value: 原始字符串值
+     */
+    private val stringIdMap = mutableMapOf<String, String>()
+    
+    /**
+     * 全局变量符号映射（用于反编译时恢复原始名称）
+     * key: 全局变量 ID (如 "global_0", "global_1" 等)
+     * value: 原始名称 (如 "console", "Math" 等)
+     */
+    private val globalSymbolMap = mutableMapOf<String, String>()
+    
+    /**
      * 命名类型定义
      */
     private val namedTypes = mutableMapOf<String, Type>()
@@ -125,6 +139,34 @@ class Module(
             ConstantString(value)
         }
     }
+    
+    /**
+     * 注册字符串 ID 映射
+     * @param strId 字符串 ID (如 "str_0")
+     * @param value 原始字符串值 (如 "console")
+     */
+    fun registerStringMapping(strId: String, value: String) {
+        stringIdMap[strId] = value
+    }
+    
+    /**
+     * 获取字符串 ID 对应的原始值
+     */
+    fun getStringById(strId: String): String? = stringIdMap[strId]
+    
+    /**
+     * 注册全局变量符号映射
+     * @param globalId 全局变量 ID (如 "global_0")
+     * @param symbolName 原始符号名称 (如 "console")
+     */
+    fun registerGlobalSymbol(globalId: String, symbolName: String) {
+        globalSymbolMap[globalId] = symbolName
+    }
+    
+    /**
+     * 获取全局变量 ID 对应的原始符号名称
+     */
+    fun getGlobalSymbolById(globalId: String): String? = globalSymbolMap[globalId]
     
     /**
      * 获取所有字符串常量

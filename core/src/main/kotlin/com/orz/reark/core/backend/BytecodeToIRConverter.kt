@@ -32,13 +32,15 @@ class BytecodeToIRConverter(private val module: Module) {
      * @param paramCount 实际函数参数数量（不包括隐式参数 FunctionObject, NewTarget, this）
      * @param numVRegs 虚拟寄存器总数（用于计算参数寄存器位置）
      * @param numArgs 总参数数量（包括隐式参数，用于计算参数寄存器位置）
+     * @param stringPool 可选的字符串池，用于恢复原始字符串
      */
     fun convert(
         functionName: String,
         bytecode: ByteArray,
         paramCount: Int = 0,
         numVRegs: Int = 0,
-        numArgs: Int = 0
+        numArgs: Int = 0,
+        stringPool: Map<Int, String>? = null
     ): ConversionResult {
         val warnings = mutableListOf<String>()
         val errors = mutableListOf<String>()
@@ -69,7 +71,7 @@ class BytecodeToIRConverter(private val module: Module) {
         }
         
         // 执行转换
-        performConversion(function, instructions, paramCount, numVRegs, numArgs, warnings, errors)
+        performConversion(function, instructions, paramCount, numVRegs, numArgs, warnings, errors, stringPool)
         
         // 验证函数
         if (!function.verify()) {
@@ -89,7 +91,8 @@ class BytecodeToIRConverter(private val module: Module) {
         numVRegs: Int,
         numArgs: Int,
         warnings: MutableList<String>,
-        errors: MutableList<String>
+        errors: MutableList<String>,
+        stringPool: Map<Int, String>? = null
     ) {
         // 分析控制流
         val blockBoundaries = ControlFlowAnalyzer.analyzeBlockBoundaries(instructions)
@@ -110,11 +113,16 @@ class BytecodeToIRConverter(private val module: Module) {
         // 创建 SSA 构造上下文，传入 blockMap 以便指令转换器可以使用预创建的块
         val context = SSAConstructionContext(builder, module, blockMap)
 
+        // 注册字符串映射（如果提供了字符串池）
+        stringPool?.entries?.forEach { entry ->
+            module.registerStringMapping("str_${entry.key}", entry.value)
+        }
+
         // 设置参数寄存器映射
         // PandaVM 调用约定：
         // - numVRegs 是局部变量寄存器数量 (v0 到 v{numVRegs-1})
         // - 参数从 numVRegs + numArgs - paramCount 开始存放
-        // - numArgs 包括3个隐式参数 (FunctionObject, NewTarget, this) + 实际参数
+        // - numArgs 包括 3 个隐式参数 (FunctionObject, NewTarget, this) + 实际参数
         if (paramCount > 0 && numVRegs > 0) {
             // 第一个实际参数的寄存器编号 = numVRegs + numArgs - paramCount
             // 例如：numVRegs=4, numArgs=5, paramCount=2
@@ -122,7 +130,7 @@ class BytecodeToIRConverter(private val module: Module) {
             val firstArgReg = numVRegs + numArgs - paramCount
             context.registerMapper.setupArgumentRegisters(function.arguments(), firstArgReg)
         } else if (paramCount > 0) {
-            // 如果没有 numVRegs 信息，使用默认方式（从0开始）
+            // 如果没有 numVRegs 信息，使用默认方式（从 0 开始）
             context.registerMapper.setupArgumentRegisters(function.arguments())
         }
 

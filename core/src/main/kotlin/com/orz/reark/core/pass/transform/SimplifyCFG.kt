@@ -104,10 +104,8 @@ class SimplifyCFG : FunctionPass {
 
             // 可以合并
             // 1. 移除当前块的终止指令（br 等）
-            if (terminator != null) {
-                block.remove(terminator)
-                terminator.dropOperands()
-            }
+            block.remove(terminator)
+            terminator.dropOperands()
 
             // 2. 移动后继的所有指令到当前块
             succ.instructions().toList().forEach { inst ->
@@ -252,21 +250,5 @@ class SimplifyCFG : FunctionPass {
         }
 
         return modified
-    }
-}
-
-/**
- * 扁平化控制流 (Flatten CFG)
- *
- * 将结构化控制流转换为更简单的形式
- */
-class FlattenCFG : FunctionPass {
-
-    override val name: String = "flatten"
-    override val description: String = "Flatten Control Flow Graph"
-
-    override fun run(function: SSAFunction): PassResult {
-        // 简化的实现
-        return PassResult.Success(false)
     }
 }

@@ -378,8 +378,12 @@ object StandardInstructionConverter {
         opcode: PandaAsmOpcodes.StandardOpcode
     ) {
         val builder = context.builder
-        // 二元运算和比较指令格式: op_imm_8_v_8
-        // 第一个操作数是立即数(IC槽索引)，第二个操作数是寄存器
+        // 二元运算和比较指令格式：op_imm_8_v_8
+        // 第一个操作数是立即数 (IC 槽索引)，第二个操作数是寄存器
+        // PandaASM 的比较指令语义是：acc op reg
+        // 但为了正确反编译高级语言，需要交换操作数顺序
+        // 因为高级语言的比较通常是：reg op acc
+        // 例如：i < 10 对应汇编：lda 10; less i => 10 < i (汇编) => i < 10 (高级语言)
         if (inst.operands.size < 2) {
             throw IllegalArgumentException("Comparison instruction requires 2 operands, got ${inst.operands.size}")
         }
@@ -388,20 +392,27 @@ object StandardInstructionConverter {
         val reg = inst.operands[1] as? PandaAsmParser.Operand.Register8
             ?: throw IllegalArgumentException("Expected register operand at index 1, got ${inst.operands[1]}")
 
-        val rightValue = context.registerMapper.readRegister(reg.regNum)
+        val leftValue = context.registerMapper.readRegister(reg.regNum)
             ?: throw IllegalStateException("Register v${reg.regNum} not defined. Available registers: ${context.registerMapper.getUsedRegisters()}")
 
-        val leftValue = context.getAccumulator()
+        val rightValue = context.getAccumulator()
 
         val result = when (opcode) {
             PandaAsmOpcodes.StandardOpcode.EQ -> builder.createICmpEQ(leftValue, rightValue)
             PandaAsmOpcodes.StandardOpcode.NOTEQ -> builder.createICmpNE(leftValue, rightValue)
+            // 关键修复：交换操作数顺序
+            // less 指令计算的是 acc < reg，但高级语言需要的是 reg < acc
+            // 例如：i < 10 对应汇编：lda 10; less i => 10 < i (汇编语义)
+            // 我们需要生成 i < 10，所以交换操作数：LT(reg, acc)
             PandaAsmOpcodes.StandardOpcode.LESS -> builder.createICmpSLT(leftValue, rightValue)
             PandaAsmOpcodes.StandardOpcode.LESSEQ -> builder.createICmpSLE(leftValue, rightValue)
+            // GREATER 也需要交换，因为 acc > reg 等价于 reg < acc
+            // 但 GREATER 的语义是 acc > reg，交换后是 reg > acc，所以使用 SGT
             PandaAsmOpcodes.StandardOpcode.GREATER -> builder.createICmpSGT(leftValue, rightValue)
             PandaAsmOpcodes.StandardOpcode.GREATEREQ -> builder.createICmpSGE(leftValue, rightValue)
             PandaAsmOpcodes.StandardOpcode.STRICTEQ -> builder.createStrictEq(leftValue, rightValue)
             PandaAsmOpcodes.StandardOpcode.STRICTNOTEQ -> builder.createStrictNe(leftValue, rightValue)
+            // ISIN 的操作数顺序特殊：acc isin reg => reg in acc
             PandaAsmOpcodes.StandardOpcode.ISIN -> builder.createIsIn(rightValue, leftValue)
             PandaAsmOpcodes.StandardOpcode.INSTANCEOF -> builder.createInstanceOf(leftValue, rightValue)
             else -> throw IllegalStateException("Unexpected opcode: $opcode")
@@ -440,7 +451,10 @@ object StandardInstructionConverter {
         val strId = inst.operands.getOrNull(1) as? PandaAsmParser.Operand.StringId
             ?: throw IllegalArgumentException("Expected string ID")
         val obj = context.getAccumulator()
-        val key = module.getOrCreateStringConstant("prop_${strId.id}")
+        // 尝试从模块获取原始字符串值
+        val strKey = "str_${strId.id}"
+        val strValue = module.getStringById(strKey) ?: "prop_${strId.id}"
+        val key = module.getOrCreateStringConstant(strValue)
         context.setAccumulator(context.builder.createGetProperty(obj, key))
     }
     
@@ -451,8 +465,18 @@ object StandardInstructionConverter {
     ) {
         val strId = inst.operands.getOrNull(1) as? PandaAsmParser.Operand.StringId
             ?: throw IllegalArgumentException("Expected string ID")
-        val name = "global_${strId.id}"
-        val globalRef = GlobalValue(anyType, name, true)
+        val strKey = "str_${strId.id}"
+        // 尝试获取原始字符串值（如 "console"）
+        val symbolName = module.getStringById(strKey)
+        val globalId = "global_${strId.id}"
+        
+        // 如果有符号名称，注册全局变量符号映射
+        if (symbolName != null) {
+            module.registerGlobalSymbol(globalId, symbolName)
+        }
+        
+        // 创建带有符号名称的全局引用
+        val globalRef = GlobalValue(anyType, globalId, true, symbolName)
         context.setAccumulator(globalRef)
     }
     

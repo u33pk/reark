@@ -300,12 +300,30 @@ class Argument(
 
 /**
  * 全局值引用
+ * 
+ * @param type 值类型
+ * @param name 内部名称（如 "global_0"）
+ * @param isExternal 是否为外部引用
+ * @param symbolName 可选的符号名称（如 "console"），用于反编译时恢复原始名称
  */
 class GlobalValue(
     type: Type,
     name: String,
-    val isExternal: Boolean = false
+    val isExternal: Boolean = false,
+    val symbolName: String? = null
 ) : Value(type, name) {
     
-    override fun toString(): String = "@$name"
+    override fun toString(): String {
+        // 如果有符号名称，优先显示符号名称
+        return if (symbolName != null) {
+            "@$symbolName"
+        } else {
+            "@$name"
+        }
+    }
+    
+    /**
+     * 获取显示名称（用于 IR 输出）
+     */
+    fun getDisplayName(): String = symbolName ?: name
 }
