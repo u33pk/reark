@@ -506,19 +506,23 @@ object StandardInstructionConverter {
             ?: throw IllegalStateException("Register v${reg.regNum} not defined. Available registers: ${context.registerMapper.getUsedRegisters()}")
 
         val leftValue = context.getAccumulator()
+        
+        // 关键修复：根据 pandaASM.md 文档，二元运算指令的语义是 `reg op acc`
+        // 例如：sub2 RR, vAA 计算 `A - acc`，即 `寄存器值 - 累加器值`
+        // 操作数顺序：reg op acc
         val result = when (opcode) {
-            PandaAsmOpcodes.StandardOpcode.ADD2 -> builder.createAdd(leftValue, rightValue)
-            PandaAsmOpcodes.StandardOpcode.SUB2 -> builder.createSub(leftValue, rightValue)
-            PandaAsmOpcodes.StandardOpcode.MUL2 -> builder.createMul(leftValue, rightValue)
-            PandaAsmOpcodes.StandardOpcode.DIV2 -> builder.createDiv(leftValue, rightValue)
-            PandaAsmOpcodes.StandardOpcode.MOD2 -> builder.createMod(leftValue, rightValue)
-            PandaAsmOpcodes.StandardOpcode.SHL2 -> builder.createShl(leftValue, rightValue)
-            PandaAsmOpcodes.StandardOpcode.SHR2 -> builder.createShr(leftValue, rightValue)
-            PandaAsmOpcodes.StandardOpcode.ASHR2 -> builder.createAShr(leftValue, rightValue)
-            PandaAsmOpcodes.StandardOpcode.AND2 -> builder.createAnd(leftValue, rightValue)
-            PandaAsmOpcodes.StandardOpcode.OR2 -> builder.createOr(leftValue, rightValue)
-            PandaAsmOpcodes.StandardOpcode.XOR2 -> builder.createXor(leftValue, rightValue)
-            PandaAsmOpcodes.StandardOpcode.EXP -> builder.createExp(leftValue, rightValue)
+            PandaAsmOpcodes.StandardOpcode.ADD2 -> builder.createAdd(rightValue, leftValue)  // reg + acc
+            PandaAsmOpcodes.StandardOpcode.SUB2 -> builder.createSub(rightValue, leftValue)  // reg - acc
+            PandaAsmOpcodes.StandardOpcode.MUL2 -> builder.createMul(rightValue, leftValue)  // reg * acc
+            PandaAsmOpcodes.StandardOpcode.DIV2 -> builder.createDiv(rightValue, leftValue)  // reg / acc
+            PandaAsmOpcodes.StandardOpcode.MOD2 -> builder.createMod(rightValue, leftValue)  // reg % acc
+            PandaAsmOpcodes.StandardOpcode.SHL2 -> builder.createShl(rightValue, leftValue)  // reg << acc
+            PandaAsmOpcodes.StandardOpcode.SHR2 -> builder.createShr(rightValue, leftValue)  // reg >> acc
+            PandaAsmOpcodes.StandardOpcode.ASHR2 -> builder.createAShr(rightValue, leftValue) // reg >>> acc
+            PandaAsmOpcodes.StandardOpcode.AND2 -> builder.createAnd(rightValue, leftValue)  // reg & acc
+            PandaAsmOpcodes.StandardOpcode.OR2 -> builder.createOr(rightValue, leftValue)    // reg | acc
+            PandaAsmOpcodes.StandardOpcode.XOR2 -> builder.createXor(rightValue, leftValue)  // reg ^ acc
+            PandaAsmOpcodes.StandardOpcode.EXP -> builder.createExp(rightValue, leftValue)   // reg ** acc
             else -> throw IllegalStateException("Unexpected opcode: $opcode")
         }
         context.setAccumulator(result)
