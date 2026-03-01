@@ -173,10 +173,31 @@ class PandaAsmParser(private val bytecode: ByteArray) {
 
             // 8 位立即数 (单操作数)
             // 注意：0x4F-0x5B 是条件跳转指令，在后面单独处理
-            0x05, 0x09, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x31, 0x32, 0x33,
-            0x34, 0x35, 0x36, 0x3C, 0x3D,
+            0x05, 0x09, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x32, 0x33,
+            0x34, 0x36, 0x3C, 0x3D,
             0x67, 0x68, 0x73, 0x76, 0x77, 0x7B, 0x7C, 0x7D, 0x7E, 0xCF, 0xD6, 0xD7 ->
                 listOf(Operand.Immediate8(readUnsignedByte()))
+
+            // callthisrange 0x31: imm1:u8, imm2:u8, v:in:top (range_0 表示从 v 开始的连续寄存器)
+            // imm1: IC 槽索引，imm2: 参数个数
+            0x31 -> {
+                val imm1 = readUnsignedByte()
+                val imm2 = readUnsignedByte()
+                val reg = readUnsignedByte()
+                listOf(Operand.Immediate8(imm1), Operand.Immediate8(imm2), Operand.Register8(reg))
+            }
+
+            // defineclasswithbuffer 0x35: imm1:u8, method_id:u16, literalarray_id:u16, imm2:u16, v:in:top
+            0x35 -> {
+                val imm1 = readUnsignedByte()
+                val methodId = readUnsignedShort()
+                val literalArrayId = readUnsignedShort()
+                val imm2 = readUnsignedShort()
+                val reg = readUnsignedByte()
+                listOf(Operand.Immediate8(imm1), Operand.MethodId(methodId),
+                       Operand.LiteralArrayId(literalArrayId), Operand.Immediate16(imm2),
+                       Operand.Register8(reg))
+            }
 
             // 8 位寄存器 (lda=0x60, sta=0x61)
             0x60, 0x61 -> listOf(Operand.Register8(readUnsignedByte()))
@@ -222,7 +243,37 @@ class PandaAsmParser(private val bytecode: ByteArray) {
             }
 
             // 8 位寄存器 (单个)
-            0x08, 0x36 -> listOf(Operand.Register8(readUnsignedByte()))
+            0x36 -> listOf(Operand.Register8(readUnsignedByte()))
+
+            // newobjrange 0x08: imm1:u8, imm2:u8, v:in:top
+            0x08 -> {
+                val imm1 = readUnsignedByte()
+                val imm2 = readUnsignedByte()
+                val reg = readUnsignedByte()
+                listOf(Operand.Immediate8(imm1), Operand.Immediate8(imm2), Operand.Register8(reg))
+            }
+
+            // 两个 8 位寄存器 (MOV_8=0x45)
+            0x45 -> {
+                val dstReg = readUnsignedByte()
+                val srcReg = readUnsignedByte()
+                listOf(Operand.Register8(dstReg), Operand.Register8(srcReg))
+            }
+
+            // 两个 4 位寄存器 (MOV_4=0x44) - 编码在同一个字节中
+            0x44 -> {
+                val byte = readUnsignedByte()
+                val dstReg = byte and 0x0F
+                val srcReg = (byte shr 4) and 0x0F
+                listOf(Operand.Register8(dstReg), Operand.Register8(srcReg))
+            }
+
+            // 两个 16 位寄存器 (MOV_16=0x8F)
+            0x8F -> {
+                val dstReg = readUnsignedShort()
+                val srcReg = readUnsignedShort()
+                listOf(Operand.Register16(dstReg), Operand.Register16(srcReg))
+            }
 
             // 8 位立即数 + 8 位寄存器 (二元运算和比较指令)
             // add2(0x0A), sub2(0x0B), mul2(0x0C), div2(0x0D), mod2(0x0E)
@@ -238,10 +289,10 @@ class PandaAsmParser(private val bytecode: ByteArray) {
 
             // 8 位立即数 (一元运算指令 - IC 槽索引)
             // not(0x20), inc(0x21), dec(0x22), istrue(0x23), isfalse(0x24)
-            // typeof(0x1C), tonumber(0x1D), tonumeric(0x1E)
+            // typeof(0x1C), tonumber(0x1D), tonumeric(0x1E), neg(0x1F)
             // 这些指令的格式是 op_imm_8，操作数是 IC 槽索引，不是寄存器
             // acc: inout:top 表示从累加器读取输入并将结果写入累加器
-            0x1C, 0x1D, 0x1E, 0x20, 0x21, 0x22, 0x23, 0x24 -> listOf(Operand.Immediate8(readUnsignedByte()))
+            0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24 -> listOf(Operand.Immediate8(readUnsignedByte()))
 
             // 32 位立即数 (ldai)
             0x62 -> listOf(Operand.Immediate32(readInt()))

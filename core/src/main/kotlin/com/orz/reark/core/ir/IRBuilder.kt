@@ -267,13 +267,16 @@ class IRBuilder(
         insert(CallRuntimeInst(runtimeFunc, args, name), name)
     
     // ==================== 对象操作 ====================
-    
+
     fun createEmptyObject(name: String = ""): Value =
         insert(CreateEmptyObjectInst(name), name)
-    
+
     fun createEmptyArray(capacity: Int = 0, name: String = ""): Value =
         insert(CreateEmptyArrayInst(capacity, name), name)
-    
+
+    fun createDefineClass(className: String, methods: List<MethodInfo>, literalArrayId: Int, name: String = ""): Value =
+        insert(DefineClassInst(className, methods, literalArrayId, name), name)
+
     fun createGetProperty(obj: Value, key: Value, name: String = ""): Value =
         insert(GetPropertyInst(obj, key, name), name)
     

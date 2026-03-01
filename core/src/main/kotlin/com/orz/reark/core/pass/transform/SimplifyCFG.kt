@@ -2,6 +2,7 @@ package com.orz.reark.core.pass.transform
 
 import com.orz.reark.core.ir.BasicBlock
 import com.orz.reark.core.ir.BranchInst
+import com.orz.reark.core.ir.CondBranchCmpInst
 import com.orz.reark.core.ir.CondBranchInst
 import com.orz.reark.core.ir.ConstantInt
 import com.orz.reark.core.pass.FunctionPass
@@ -210,9 +211,12 @@ class SimplifyCFG : FunctionPass {
             // 关键修复：检查是否有前驱使用条件分支指向此块
             // 如果有，不能消除，因为需要保留条件分支的两条路径
             val hasCondBranchPred = block.predecessors().any { pred ->
-                pred.terminator() is CondBranchInst
+                val term = pred.terminator()
+                term is CondBranchInst || term is CondBranchCmpInst
             }
-            if (hasCondBranchPred) continue
+            if (hasCondBranchPred) {
+                continue
+            }
 
             // 更新所有前驱
             val preds = block.predecessors().toList()
@@ -225,21 +229,64 @@ class SimplifyCFG : FunctionPass {
                     }
                 }
 
-                // 更新跳转目标
-                pred.replaceSuccessor(block, target)
+                // 不再调用 replaceSuccessor，直接更新终止指令
+                // 因为 replaceSuccessor 不会更新指令中的目标块
 
                 // 更新终止指令
                 when (val term = pred.terminator()) {
                     is BranchInst -> {
                         pred.remove(term)
                         pred.append(BranchInst(target))
+                        // 更新后继关系
+                        pred.removeSuccessor(block)
+                        pred.addSuccessor(target)
                     }
                     is CondBranchInst -> {
                         // 创建新的条件分支指令，替换目标块
                         val newTrueTarget = if (term.trueTarget == block) target else term.trueTarget
                         val newFalseTarget = if (term.falseTarget == block) target else term.falseTarget
+                        println("DEBUG:   updating CondBranchInst: ${term.trueTarget},${term.falseTarget} -> $newTrueTarget,$newFalseTarget")
                         pred.remove(term)
                         pred.append(CondBranchInst(term.condition, newTrueTarget, newFalseTarget))
+                        // 更新后继关系
+                        pred.removeSuccessor(block)
+                        if (block !in pred.successors()) {
+                            pred.addSuccessor(target)
+                        }
+                    }
+                    is CondBranchCmpInst -> {
+                        // 处理带比较的条件分支（br_ge, br_lt 等）
+                        val newTrueTarget = if (term.trueTarget == block) target else term.trueTarget
+                        val newFalseTarget = if (term.falseTarget == block) target else term.falseTarget
+                        pred.remove(term)
+                        // 创建新的同类型分支指令
+                        val newTerm = when (term) {
+                            is com.orz.reark.core.ir.BranchLtInst ->
+                                com.orz.reark.core.ir.BranchLtInst(term.left, term.right, newTrueTarget, newFalseTarget)
+                            is com.orz.reark.core.ir.BranchLeInst ->
+                                com.orz.reark.core.ir.BranchLeInst(term.left, term.right, newTrueTarget, newFalseTarget)
+                            is com.orz.reark.core.ir.BranchGtInst ->
+                                com.orz.reark.core.ir.BranchGtInst(term.left, term.right, newTrueTarget, newFalseTarget)
+                            is com.orz.reark.core.ir.BranchGeInst ->
+                                com.orz.reark.core.ir.BranchGeInst(term.left, term.right, newTrueTarget, newFalseTarget)
+                            is com.orz.reark.core.ir.BranchEqInst ->
+                                com.orz.reark.core.ir.BranchEqInst(term.left, term.right, newTrueTarget, newFalseTarget)
+                            is com.orz.reark.core.ir.BranchNeInst ->
+                                com.orz.reark.core.ir.BranchNeInst(term.left, term.right, newTrueTarget, newFalseTarget)
+                            else -> {
+                                throw AssertionError("Unknown CondBranchCmpInst type: ${term::class}")
+                            }
+                        }
+                        pred.append(newTerm)
+                        // 更新后继关系
+                        pred.removeSuccessor(block)
+                        if (block !in pred.successors()) {
+                            pred.addSuccessor(target)
+                        }
+                    }
+                    else -> {
+                        // 其他情况不应该发生
+                        println("DEBUG: unexpected terminator in pred $pred: $term")
                     }
                 }
             }

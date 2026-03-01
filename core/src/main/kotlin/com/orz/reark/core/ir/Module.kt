@@ -22,6 +22,12 @@ class Module(
     private val stringConstants = mutableMapOf<String, ConstantString>()
     
     /**
+     * 字符串池（用于反编译时恢复原始字符串）
+     * key: 字符串 ID (Int), value: 原始字符串值
+     */
+    private val stringPool = mutableMapOf<Int, String>()
+
+    /**
      * 字符串 ID 到字符串值的映射（用于反编译时恢复原始字符串）
      * key: 字符串 ID (如 "str_0", "str_1" 等)
      * value: 原始字符串值
@@ -141,6 +147,18 @@ class Module(
     }
     
     /**
+     * 设置字符串池
+     */
+    fun setStringPool(pool: Map<Int, String>) {
+        stringPool.putAll(pool)
+    }
+
+    /**
+     * 获取字符串池
+     */
+    fun getStringPool(): Map<Int, String> = stringPool.toMap()
+
+    /**
      * 注册字符串 ID 映射
      * @param strId 字符串 ID (如 "str_0")
      * @param value 原始字符串值 (如 "console")
@@ -148,7 +166,7 @@ class Module(
     fun registerStringMapping(strId: String, value: String) {
         stringIdMap[strId] = value
     }
-    
+
     /**
      * 获取字符串 ID 对应的原始值
      */

@@ -350,7 +350,7 @@ class RegisterToSSAMapper {
      * 使用 visited 集合避免循环依赖
      */
     private fun getRegisterValueInBlock(
-        registerNum: Int, 
+        registerNum: Int,
         block: BasicBlock,
         visited: MutableSet<BasicBlock>
     ): Value? {

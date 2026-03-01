@@ -26,3 +26,15 @@ kotlin {
 tasks.test {
     useJUnitPlatform()
 }
+
+tasks.register<JavaExec>("TestAbc") {
+    group = "application"
+    mainClass.set("TestAbc")
+    classpath = sourceSets["test"].runtimeClasspath
+}
+
+tasks.register<JavaExec>("DebugAbc") {
+    group = "application"
+    mainClass.set("DebugAbc")
+    classpath = sourceSets["test"].runtimeClasspath
+}

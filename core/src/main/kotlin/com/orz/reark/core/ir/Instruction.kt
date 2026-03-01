@@ -99,10 +99,13 @@ enum class Opcode {
     NEW,               // new 操作符
     NEW_RANGE,         // new 操作符（范围参数）
 
+    // ==================== 类与对象定义 ====================
+    DEFINE_CLASS,      // 定义类
+    DEFINE_METHOD,     // 定义方法
+    DEFINE_FIELD,      // 定义字段
+
     // ==================== 函数相关 ====================
     DEFINE_FUNC,       // 定义函数
-    DEFINE_METHOD,     // 定义方法
-    DEFINE_CLASS,      // 定义类
 
     // ==================== 环境/词法作用域 ====================
     NEW_LEX_ENV,       // 创建词法环境

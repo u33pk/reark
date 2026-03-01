@@ -16,12 +16,12 @@ object ControlFlowAnalyzer {
      */
     fun analyzeBlockBoundaries(instructions: List<PandaAsmParser.ParsedInstruction>): Set<Int> {
         val boundaries = mutableSetOf<Int>()
-        
+
         // 第一条指令是边界
         if (instructions.isNotEmpty()) {
             boundaries.add(instructions[0].offset)
         }
-        
+
         for ((index, inst) in instructions.withIndex()) {
             // 跳转指令的目标是边界
             if (isJumpInstruction(inst)) {
@@ -34,7 +34,7 @@ object ControlFlowAnalyzer {
                     boundaries.add(instructions[index + 1].offset)
                 }
             }
-            
+
             // 终止指令之后是边界
             if (isTerminatorInstruction(inst)) {
                 if (index + 1 < instructions.size) {
@@ -42,7 +42,7 @@ object ControlFlowAnalyzer {
                 }
             }
         }
-        
+
         return boundaries
     }
     

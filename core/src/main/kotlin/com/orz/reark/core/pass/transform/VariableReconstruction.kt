@@ -14,6 +14,7 @@ import com.orz.reark.core.ir.Function as SSAFunction
  * 1. 识别 Phi 节点链：reg_7_phi, %30, %39 属于同一变量
  * 2. 识别参数链：arg0 和相关的 Phi 节点属于同一变量
  * 3. 统一重命名为有意义的变量名
+ * 4. 区分不同循环的迭代变量（i1, i2, i3...）
  *
  * 示例：
  * ```
@@ -40,37 +41,43 @@ class VariableReconstruction : FunctionPass {
         // 使用并查集将相关的值分组
         val valueGroups = ValueGrouper(function)
 
-        // 步骤 2: 为每组分配变量名
-        val groupNames = mutableMapOf<Int, String>()
+        // 步骤 2: 识别所有循环变量（有回边且有 INC/DEC 更新的 Phi 节点）
+        val loopVariablePhis = identifyLoopVariablePhis(function)
 
-        // 首先处理参数 - 参数组命名为 "i"（循环变量）
-        function.arguments().forEach { arg ->
-            val groupId = valueGroups.getGroupId(arg)
-            groupNames[groupId] = "i"
+        // 步骤 3: 为每个循环变量 Phi 分配唯一的名称 (i1, i2, i3...)
+        val phiNames = mutableMapOf<PhiInst, String>()
+        var loopVarCounter = 1
+        loopVariablePhis.forEach { phi ->
+            phiNames[phi] = "i$loopVarCounter"
+            loopVarCounter++
         }
 
-        // 处理 Phi 节点 - 与参数同组的 Phi 也命名为 "i"
-        function.blocks().forEach { block ->
-            block.instructions().forEach { inst ->
-                if (inst is PhiInst) {
-                    val groupId = valueGroups.getGroupId(inst)
-                    // 检查 Phi 的输入是否包含参数
-                    val hasArgInput = (0 until inst.incomingCount())
-                        .any { i -> inst.getOperand(i) is Argument }
-                    if (hasArgInput) {
-                        groupNames[groupId] = "i"
-                    }
-                }
+        // 步骤 4: 重命名
+        // 对于循环变量 Phi 及其相关指令，使用分配的变量名
+        // 对于其他指令，使用 ValueGrouper 分组来查找对应的循环变量名
+        val groupToPhiName = mutableMapOf<Int, String>()
+        loopVariablePhis.forEach { phi ->
+            val groupId = valueGroups.getGroupId(phi)
+            val name = phiNames[phi]
+            if (name != null) {
+                groupToPhiName[groupId] = name
             }
         }
 
-        // 步骤 3: 重命名
         function.blocks().forEach { block ->
             block.instructions().forEach { inst ->
-                if (inst is PhiInst || inst is AddInst || inst is IncInst || 
-                    inst is CopyInst || inst is ToNumericInst) {
+                if (inst is PhiInst) {
+                    // Phi 节点直接使用 phiNames
+                    val newName = phiNames[inst]
+                    if (newName != null && inst.name != newName) {
+                        inst.name = newName
+                        modified = true
+                    }
+                } else if (inst is AddInst || inst is IncInst || inst is CopyInst ||
+                    inst is ToNumericInst || inst is SubInst || inst is DecInst) {
+                    // 其他指令通过 ValueGrouper 分组查找对应的变量名
                     val groupId = valueGroups.getGroupId(inst)
-                    val newName = groupNames[groupId]
+                    val newName = groupToPhiName[groupId]
                     if (newName != null && inst.name != newName) {
                         inst.name = newName
                         modified = true
@@ -83,37 +90,76 @@ class VariableReconstruction : FunctionPass {
     }
 
     /**
-     * 根据指令类型推断变量名
+     * 识别所有循环变量 Phi 节点
+     * 循环变量的特征：
+     * 1. Phi 节点有来自回边（back edge）的输入
+     * 2. 该 Phi 节点的值在循环体中被 INC/DEC 指令更新（通过 copy 链回写）
      */
-    private fun inferVariableName(inst: Instruction, index: Int): String {
-        return when (inst) {
-            is PhiInst -> {
-                // 检查是否是循环变量
-                val hasSelfReference = hasSelfReference(inst)
-                if (hasSelfReference) {
-                    "i"  // 循环变量
-                } else {
-                    "v$index"
+    private fun identifyLoopVariablePhis(
+        function: SSAFunction
+    ): List<PhiInst> {
+        val loopVariablePhis = mutableSetOf<PhiInst>()
+
+        // 第一步：建立从 Phi 节点到其更新指令（INC/DEC）的映射
+        // 查找模式：Phi -> ... -> INC/DEC(Phi 的值) -> copy -> Phi
+        val phiToUpdate = mutableMapOf<PhiInst, Instruction>()
+        
+        function.blocks().forEach { block ->
+            block.instructions().forEach { inst ->
+                if (inst is IncInst || inst is DecInst) {
+                    // 查找 INC/DEC 的操作数来源
+                    val operand = inst.operand
+                    // 如果操作数是 Phi 节点或通过 copy 链追溯到 Phi
+                    val sourcePhi = findSourcePhi(operand)
+                    if (sourcePhi != null) {
+                        phiToUpdate[sourcePhi] = inst
+                    }
                 }
             }
-            is AddInst, is IncInst -> "i_next"
-            else -> "v$index"
+        }
+
+        // 第二步：找到有回边输入且有对应更新指令的 Phi 节点
+        function.blocks().forEach { block ->
+            block.instructions().forEach { inst ->
+                if (inst is PhiInst && hasBackEdgeInput(inst)) {
+                    if (inst in phiToUpdate) {
+                        loopVariablePhis.add(inst)
+                    }
+                }
+            }
+        }
+
+        return loopVariablePhis.toList()
+    }
+    
+    /**
+     * 查找值的来源 Phi 节点（通过 copy 链追溯）
+     */
+    private fun findSourcePhi(value: Value, visited: MutableSet<Value> = mutableSetOf()): PhiInst? {
+        if (value in visited) return null
+        visited.add(value)
+        
+        return when (value) {
+            is PhiInst -> value
+            is CopyInst -> findSourcePhi(value.source, visited)
+            is ToNumericInst -> findSourcePhi(value.operand, visited)
+            else -> null
         }
     }
 
     /**
-     * 检查 Phi 节点是否有自引用（循环变量特征）
+     * 检查 Phi 节点是否有回边输入（循环变量特征）
+     * 回边：incoming block 是 phi 所在块的后继
      */
-    private fun hasSelfReference(phi: PhiInst): Boolean {
+    private fun hasBackEdgeInput(phi: PhiInst): Boolean {
+        val phiBlock = phi.parent ?: return false
+
         for (i in 0 until phi.incomingCount()) {
-            val operand = phi.getOperand(i)
-            if (operand is Instruction && operand.parent != phi.parent) {
-                // 检查操作数的定义块是否是该 Phi 所在块的后继
-                val operandBlock = operand.parent
-                val phiBlock = phi.parent
-                if (phiBlock?.successors()?.contains(operandBlock) == true) {
-                    return true
-                }
+            val incomingBlock = phi.getIncomingBlock(i)
+            // 检查 incoming block 是否是 phiBlock 的后继（形成回边）
+            if (incomingBlock != phiBlock &&
+                incomingBlock.successors().contains(phiBlock)) {
+                return true
             }
         }
         return false
@@ -157,7 +203,7 @@ class VariableReconstruction : FunctionPass {
                                 union(inst, inst.source)
                             }
                         }
-                        is AddInst, is IncInst -> {
+                        is AddInst, is IncInst, is SubInst, is DecInst -> {
                             // 算术运算的结果与操作数可能属于同一变量链
                             // 这里简化处理：只与左操作数分组（如果是 Phi 节点）
                             val left = when (inst) {

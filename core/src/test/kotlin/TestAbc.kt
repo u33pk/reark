@@ -1,5 +1,9 @@
 import com.orz.reark.core.backend.BytecodeToIRConverter
+import com.orz.reark.core.backend.StringPoolExtractor
 import com.orz.reark.core.ir.Module
+import com.orz.reark.core.pass.FunctionPass
+import com.orz.reark.core.pass.ModulePass
+import com.orz.reark.core.pass.Pass
 import com.orz.reark.core.pass.PassManager
 import com.orz.reark.core.pass.transform.AggressiveDeadCodeElimination
 import com.orz.reark.core.pass.transform.AlgebraicSimplification
@@ -13,6 +17,8 @@ import com.orz.reark.core.pass.transform.LoopInvariantCodeMotion
 import com.orz.reark.core.pass.transform.RedundantCopyElimination
 import com.orz.reark.core.pass.transform.RedundantReturnElimination
 import com.orz.reark.core.pass.transform.SimplifyCFG
+import com.orz.reark.core.pass.transform.StringPoolExtractionPass
+import com.orz.reark.core.pass.transform.StringPoolRegistrationPass
 import com.orz.reark.core.pass.transform.TypePropagation
 import com.orz.reark.core.pass.transform.VariableReconstruction
 import me.yricky.oh.abcd.AbcBuf
@@ -66,7 +72,7 @@ object TestAbc {
 
     @JvmStatic
     fun main(args: Array<String>){
-        val file = File("/home/orz/project/unitTest/test.abc")
+        val file = File("/home/orz/data/unitTest/test.abc")
         val mmap = FileChannel.open(file.toPath()).map(FileChannel.MapMode.READ_ONLY,0,file.length())
         val abc = AbcBuf("", wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
         println("DEBUG-")
@@ -75,7 +81,6 @@ object TestAbc {
                 item.methods.forEach { method ->
                     println("[M] ${method.name}")
                     if(method.name == "func_main_0"){
-
                     }else{
                         val codeItem = method.codeItem
                         val result = codeItem?.instructions?.toByteArray()
@@ -84,7 +89,7 @@ object TestAbc {
                             val numArgs = codeItem.numArgs
                             val numVRegs = codeItem.numVRegs
                             val actualParamCount = (numArgs - 3).coerceAtLeast(0)
-                            fullOptimizationPipeline(result, actualParamCount, numVRegs, codeItem.numArgs)
+                            fullOptimizationPipeline(abc, codeItem, result, actualParamCount, numVRegs, numArgs)
                         }
                     }
                 }
@@ -92,8 +97,27 @@ object TestAbc {
         }
     }
 
-    fun fullOptimizationPipeline(bytecode: ByteArray, paramCount: Int = 0, numVRegs: Int = 0, numArgs: Int = 0) {
+    fun fullOptimizationPipeline(
+        abc: AbcBuf,
+        codeItem: me.yricky.oh.abcd.code.Code,
+        bytecode: ByteArray,
+        paramCount: Int = 0,
+        numVRegs: Int = 0,
+        numArgs: Int = 0
+    ) {
         val module = Module("pipeline_test")
+        
+        // 先运行字符串池 Pass 提取并注册字符串
+        val prePasses: List<ModulePass> = listOf(
+            StringPoolExtractionPass(abc, codeItem),  // 从 ABC 文件提取字符串
+            StringPoolRegistrationPass()               // 注册字符串池到 stringIdMap
+        )
+        val prePm = PassManager()
+        prePasses.forEach { prePm.addPass(it) }
+        prePm.debug = true  // 启用调试输出
+        prePm.run(module)
+        
+        // 转换字节码到 IR（此时字符串池已注册）
         val converter = BytecodeToIRConverter(module)
         val result = converter.convert("optimizedFunction", bytecode, paramCount = paramCount, numVRegs = numVRegs, numArgs = numArgs)
 
@@ -105,7 +129,7 @@ object TestAbc {
         printFunctionIR("Original Function:", result.function)
         println("Original instruction count: $beforeInstCount")
 
-        val passes = listOf(
+        val passes: List<com.orz.reark.core.pass.Pass> = listOf(
             AggressiveDeadCodeElimination(),
             RedundantReturnElimination(),
             ConstantFolding(),
@@ -126,7 +150,10 @@ object TestAbc {
         var currentInstCount = beforeInstCount
         for ((index, pass) in passes.withIndex()) {
             val pm = PassManager()
-            pm.addPass(pass)
+            when (pass) {
+                is ModulePass -> pm.addPass(pass)
+                is FunctionPass -> pm.addPass(pass)
+            }
             pm.run(module)
 
             val newCount = module.allInstructions().count()

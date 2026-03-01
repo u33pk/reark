@@ -650,10 +650,40 @@ class CallRuntimeInst(
 /**
  * 创建空对象
  */
-class CreateEmptyObjectInst(name: String = "") : 
+class CreateEmptyObjectInst(name: String = "") :
     Instruction(Opcode.CREATE_OBJECT, objectType, name) {
     override fun getOpcodeString(): String = "create_empty_object"
     override fun toString(): String = "${getNameOrTemporary()} = create_empty_object"
+}
+
+/**
+ * 方法信息 - 用于类定义
+ */
+data class MethodInfo(
+    val name: String,           // 方法名称
+    val methodId: Int,          // 方法 ID（来自方法表）
+    val affiliate: Int          // 方法附属信息（如方法类型）
+)
+
+/**
+ * 定义类指令
+ * 
+ * 对应 defineclasswithbuffer 指令，用于定义类并关联方法
+ * 
+ * @param className 类名称
+ * @param methods 类中定义的方法列表
+ * @param literalArrayId 字面量数组 ID
+ * @param name 结果寄存器名称
+ */
+class DefineClassInst(
+    val className: String,
+    val methods: List<MethodInfo>,
+    val literalArrayId: Int,
+    name: String = ""
+) : Instruction(Opcode.DEFINE_CLASS, objectType, name) {
+    override fun getOpcodeString(): String = "defineclass"
+    override fun toString(): String =
+        "${getNameOrTemporary()} = defineclass $className { ${methods.joinToString(", ") { it.name }} }"
 }
 
 /**

@@ -201,7 +201,18 @@ class LoopInvariantCodeMotion : FunctionPass {
         // 有副作用的指令不能提升
         if (inst.mayHaveSideEffects()) return false
 
-        // 检查所有操作数是否在循环外定义
+        // 收集循环中所有的 Phi 节点（循环变量）
+        val loopPhis = mutableSetOf<PhiInst>()
+        for (block in loop.body + loop.header) {
+            block.phis().forEach { phi ->
+                // 检查 Phi 节点是否有来自回边的输入（即自引用）
+                if (hasBackEdgeInput(phi, block, loop)) {
+                    loopPhis.add(phi)
+                }
+            }
+        }
+
+        // 检查所有操作数是否在循环外定义且不依赖循环变量
         for (operand in inst.operands()) {
             if (operand is Instruction) {
                 // 如果操作数是指令，检查它是否在循环体内
@@ -212,6 +223,14 @@ class LoopInvariantCodeMotion : FunctionPass {
                 if (operand.parent == loop.header) {
                     return false
                 }
+            }
+            // 关键修复 1：检查操作数是否依赖循环 Phi 节点
+            if (dependsOnLoopPhi(operand, loopPhis, mutableSetOf())) {
+                return false
+            }
+            // 关键修复 2：检查操作数是否是参数且在循环中被写回
+            if (operand is Argument && isArgumentModifiedInLoop(operand, loop)) {
+                return false
             }
         }
 
@@ -224,6 +243,65 @@ class LoopInvariantCodeMotion : FunctionPass {
         }
 
         return true
+    }
+    
+    /**
+     * 检查参数是否在循环中被写回（通过 sta 指令）
+     */
+    private fun isArgumentModifiedInLoop(arg: Argument, loop: Loop): Boolean {
+        for (block in loop.body) {
+            block.instructions().forEach { inst ->
+                // 简化检查：如果循环体内有任何 CopyInst 的源是该参数，
+                // 则认为参数被修改
+                if (inst is CopyInst && inst.source == arg) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+    
+    /**
+     * 检查值是否依赖循环 Phi 节点
+     */
+    private fun dependsOnLoopPhi(
+        value: Value,
+        loopPhis: Set<PhiInst>,
+        visited: MutableSet<Value>
+    ): Boolean {
+        // 避免无限递归
+        if (!visited.add(value)) return false
+        
+        return when (value) {
+            // 直接是循环 Phi
+            in loopPhis -> true
+            // 递归检查指令的操作数
+            is Instruction -> value.operands().any { dependsOnLoopPhi(it, loopPhis, visited) }
+            // Argument 需要特殊处理：检查是否有循环 Phi 使用该 Argument 作为初始值
+            is com.orz.reark.core.ir.Argument -> {
+                loopPhis.any { phi ->
+                    (0 until phi.incomingCount()).any { i ->
+                        phi.getOperand(i) == value
+                    }
+                }
+            }
+            // 其他值（如 Constant）不依赖循环 Phi
+            else -> false
+        }
+    }
+    
+    /**
+     * 检查 Phi 节点是否有来自回边的输入
+     */
+    private fun hasBackEdgeInput(phi: PhiInst, phiBlock: BasicBlock, loop: Loop): Boolean {
+        for (i in 0 until phi.incomingCount()) {
+            val incomingBlock = phi.getIncomingBlock(i)
+            // 如果 incoming block 在循环体内，说明有回边输入
+            if (incomingBlock in loop.body) {
+                return true
+            }
+        }
+        return false
     }
 
     /**

@@ -4,6 +4,7 @@ import com.orz.reark.core.backend.converter.ControlFlowAnalyzer
 import com.orz.reark.core.backend.converter.PrefixInstructionConverters
 import com.orz.reark.core.backend.converter.StandardInstructionConverter
 import com.orz.reark.core.ir.*
+import com.orz.reark.core.pass.PassManager
 import com.orz.reark.core.ir.Function as SSAFunction
 
 /**
@@ -26,13 +27,14 @@ class BytecodeToIRConverter(private val module: Module) {
     
     /**
      * 将字节码转换为 IR 函数
-     * 
+     *
      * @param functionName 函数名称
      * @param bytecode 字节码
      * @param paramCount 实际函数参数数量（不包括隐式参数 FunctionObject, NewTarget, this）
      * @param numVRegs 虚拟寄存器总数（用于计算参数寄存器位置）
      * @param numArgs 总参数数量（包括隐式参数，用于计算参数寄存器位置）
-     * @param stringPool 可选的字符串池，用于恢复原始字符串
+     * @param abc 可选的 ABC 文件对象，用于提取字符串池
+     * @param code 可选的代码对象，用于提取字符串池
      */
     fun convert(
         functionName: String,
@@ -40,19 +42,20 @@ class BytecodeToIRConverter(private val module: Module) {
         paramCount: Int = 0,
         numVRegs: Int = 0,
         numArgs: Int = 0,
-        stringPool: Map<Int, String>? = null
+        abc: me.yricky.oh.abcd.AbcBuf? = null,
+        code: me.yricky.oh.abcd.code.Code? = null
     ): ConversionResult {
         val warnings = mutableListOf<String>()
         val errors = mutableListOf<String>()
-        
+
         // 创建函数
         val function = module.createFunction(functionName, anyType)
-        
+
         // 添加参数
         for (i in 0 until paramCount) {
             function.addArgument(anyType, "arg$i")
         }
-        
+
         // 解析字节码
         val parser = PandaAsmParser(bytecode)
         val instructions = try {
@@ -61,7 +64,7 @@ class BytecodeToIRConverter(private val module: Module) {
             errors.add("Failed to parse bytecode: ${e.message}")
             return ConversionResult(function, warnings, errors)
         }
-        
+
         if (instructions.isEmpty()) {
             warnings.add("Empty bytecode")
             val entryBlock = function.createBlock("entry")
@@ -69,15 +72,15 @@ class BytecodeToIRConverter(private val module: Module) {
             builder.createRetVoid()
             return ConversionResult(function, warnings, errors)
         }
-        
+
         // 执行转换
-        performConversion(function, instructions, paramCount, numVRegs, numArgs, warnings, errors, stringPool)
-        
+        performConversion(function, instructions, paramCount, numVRegs, numArgs, warnings, errors)
+
         // 验证函数
         if (!function.verify()) {
             warnings.add("Function verification failed")
         }
-        
+
         return ConversionResult(function, warnings, errors)
     }
     
